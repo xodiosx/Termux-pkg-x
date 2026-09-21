@@ -24,17 +24,13 @@ if ! command -v java >/dev/null 2>&1; then
 fi
 
 # ---- 0b. Helper: make a directory writable by the current user ----
-# Needed when the SDK was extracted earlier as root (Docker layer, cached
-# CI volume, etc). Without this, Gradle's sdkmanager auto-install fails with
-# "Failed to read or create install properties file".
+# Fixes "Failed to read or create install properties file" from Gradle
+# when the SDK was extracted earlier as root (Docker layer, cached CI
+# volume, etc.). Tries sudo chown, then sudo chmod, then plain chmod.
 ensure_writable() {
     local dir="$1"
     [ -z "$dir" ] || [ ! -e "$dir" ] && return 0
-
-    # Already writable? Nothing to do.
-    if [ -w "$dir" ]; then
-        return 0
-    fi
+    [ -w "$dir" ] && return 0
 
     echo "INFO: Fixing permissions on $dir ..." >&2
     local uid gid
@@ -88,7 +84,7 @@ if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] && \
     fi
 fi
 
-# Ensure the whole SDK tree (including licenses/) is writable by us.
+# Ensure the SDK tree and licenses dir are writable by us.
 ensure_writable "$ANDROID_HOME"
 mkdir -p "$ANDROID_HOME/licenses"
 ensure_writable "$ANDROID_HOME/licenses"
@@ -129,8 +125,17 @@ fi
 echo "INFO: Using sdkmanager ... $SDK_MANAGER"
 echo "INFO: Using NDK ... $NDK"
 
-# `yes |` closes the pipe early -> sdkmanager exits non-zero under pipefail.
-# Always suffix with `|| true` so the licenses step can't kill the script.
+# ---- 4. Fix ownership BEFORE installing packages ----
+# Gradle's auto-install writes an "install properties file" into
+# $ANDROID_HOME/.knownPackages and fails with
+# "Failed to read or create install properties file" if it can't write.
+if command -v sudo >/dev/null 2>&1; then
+    sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME" 2>/dev/null || true
+else
+    chmod -R u+rwX "$ANDROID_HOME" 2>/dev/null || true
+fi
+
+# ---- 5. Install required SDK packages ----
 yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
 yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
@@ -140,5 +145,14 @@ yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
     "platforms;android-28" \
     "platforms;android-24" || true
 
-# Re-fix perms in case sdkmanager created root-owned files during install.
-ensure_writable "$ANDROID_HOME"
+# ---- 6. Fix ownership AGAIN (sdkmanager may have created root-owned files) ----
+if command -v sudo >/dev/null 2>&1; then
+    sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME" 2>/dev/null || true
+else
+    chmod -R u+rwX "$ANDROID_HOME" 2>/dev/null || true
+fi
+
+# ---- 7. Reminder: also disable Gradle auto-install ----
+# Add to xodosark-app/gradle.properties:
+#   android.builder.sdkDownload=false
+echo "INFO: Make sure android.builder.sdkDownload=false is set in gradle.properties"
