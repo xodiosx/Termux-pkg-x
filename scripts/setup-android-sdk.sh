@@ -23,6 +23,33 @@ if ! command -v java >/dev/null 2>&1; then
     need_pkg openjdk-17-jre-headless || true
 fi
 
+# ---- 0b. Helper: make a directory writable by the current user ----
+# Needed when the SDK was extracted earlier as root (Docker layer, cached
+# CI volume, etc). Without this, Gradle's sdkmanager auto-install fails with
+# "Failed to read or create install properties file".
+ensure_writable() {
+    local dir="$1"
+    [ -z "$dir" ] || [ ! -e "$dir" ] && return 0
+
+    # Already writable? Nothing to do.
+    if [ -w "$dir" ]; then
+        return 0
+    fi
+
+    echo "INFO: Fixing permissions on $dir ..." >&2
+    local uid gid
+    uid="$(id -u)"
+    gid="$(id -g)"
+
+    if command -v sudo >/dev/null 2>&1; then
+        sudo chown -R "$uid:$gid" "$dir" 2>/dev/null || \
+        sudo chmod -R u+rwX "$dir"       2>/dev/null || \
+        chmod    -R u+rwX "$dir"         2>/dev/null || true
+    else
+        chmod -R u+rwX "$dir" 2>/dev/null || true
+    fi
+}
+
 ANDROID_SDK_FILE=commandlinetools-linux-${TERMUX_SDK_REVISION}_latest.zip
 ANDROID_SDK_SHA256=0bebf59339eaa534f4217f8aa0972d14dc49e7207be225511073c661ae01da0a
 
@@ -61,6 +88,11 @@ if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] && \
     fi
 fi
 
+# Ensure the whole SDK tree (including licenses/) is writable by us.
+ensure_writable "$ANDROID_HOME"
+mkdir -p "$ANDROID_HOME/licenses"
+ensure_writable "$ANDROID_HOME/licenses"
+
 # ---- 2. Android NDK ----
 if [ ! -d "$NDK" ]; then
     echo "Downloading Android NDK..."
@@ -80,6 +112,8 @@ if [ ! -d "$NDK" ]; then
 
     rm -rf "$NDK/sources/cxx-stl/system"
 fi
+
+ensure_writable "$NDK"
 
 # ---- 3. Locate sdkmanager ----
 if   [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
@@ -105,3 +139,6 @@ yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
     "platforms;android-35" \
     "platforms;android-28" \
     "platforms;android-24" || true
+
+# Re-fix perms in case sdkmanager created root-owned files during install.
+ensure_writable "$ANDROID_HOME"
