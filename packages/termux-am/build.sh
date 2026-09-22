@@ -12,8 +12,8 @@ TERMUX_PKG_BUILD_IN_SRC=true
 TERMUX_PKG_CONFLICTS="termux-tools (<< 0.51)"
 _GRADLE_VERSION=8.10.2
 
-# Components Gradle will ask for when building TermuxAm.
-# Adjust these if you bump compileSdk / buildToolsVersion in the project.
+# SDK components TermuxAm's Gradle build needs.
+# Bump these if the project's compileSdk / buildToolsVersion changes.
 _TERMUX_AM_BUILD_TOOLS=30.0.3
 _TERMUX_AM_PLATFORM=android-33
 
@@ -52,7 +52,7 @@ termux_am_ensure_writable() {
 
 termux_step_make() {
 	# ------------------------------------------------------------------
-	# 1. Make sure ANDROID_HOME is set and writable.
+	# 1. Ensure ANDROID_HOME is set and writable.
 	# ------------------------------------------------------------------
 	: "${ANDROID_HOME:="/home/builder/lib/android-sdk"}"
 	export ANDROID_HOME
@@ -80,13 +80,33 @@ termux_step_make() {
 	# ------------------------------------------------------------------
 	# 3. Install the exact SDK components Gradle needs.
 	# ------------------------------------------------------------------
-	# Accept licenses. `yes |` closes the pipe early, so guard with `|| true`.
+	# Accept licenses. `yes |` closes the pipe early, so guard with `|| true`
+	# (sdkmanager exits non-zero when the pipe closes, even on success).
 	yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
+	# Do NOT swallow errors here — if this fails, fail the build now
+	# instead of letting Gradle fail later with a misleading message.
 	yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
 		"platform-tools" \
 		"build-tools;${_TERMUX_AM_BUILD_TOOLS}" \
-		"platforms;${_TERMUX_AM_PLATFORM}" || true
+		"platforms;${_TERMUX_AM_PLATFORM}"
+
+	# Verify the components actually landed in $ANDROID_HOME.
+	if [ ! -d "$ANDROID_HOME/platforms/${_TERMUX_AM_PLATFORM}" ]; then
+		echo "ERROR: $ANDROID_HOME/platforms/${_TERMUX_AM_PLATFORM} not found after sdkmanager" >&2
+		echo "--- contents of $ANDROID_HOME ---" >&2
+		ls -la "$ANDROID_HOME" >&2 || true
+		echo "--- contents of $ANDROID_HOME/platforms ---" >&2
+		ls -la "$ANDROID_HOME/platforms" >&2 || true
+		echo "--- contents of $ANDROID_HOME/build-tools ---" >&2
+		ls -la "$ANDROID_HOME/build-tools" >&2 || true
+		exit 1
+	fi
+	if [ ! -d "$ANDROID_HOME/build-tools/${_TERMUX_AM_BUILD_TOOLS}" ]; then
+		echo "ERROR: $ANDROID_HOME/build-tools/${_TERMUX_AM_BUILD_TOOLS} not found after sdkmanager" >&2
+		ls -la "$ANDROID_HOME/build-tools" >&2 || true
+		exit 1
+	fi
 
 	# Fix ownership again: sdkmanager may have created root-owned files.
 	termux_am_ensure_writable "$ANDROID_HOME"
@@ -94,7 +114,6 @@ termux_step_make() {
 	# ------------------------------------------------------------------
 	# 4. Download and use a new enough gradle version.
 	# ------------------------------------------------------------------
-	# (avoids the process hanging after running with older gradle)
 	termux_download \
 		https://services.gradle.org/distributions/gradle-$_GRADLE_VERSION-bin.zip \
 		$TERMUX_PKG_CACHEDIR/gradle-$_GRADLE_VERSION-bin.zip \
@@ -103,11 +122,11 @@ termux_step_make() {
 	unzip -q $TERMUX_PKG_CACHEDIR/gradle-$_GRADLE_VERSION-bin.zip -d $TERMUX_PKG_TMPDIR/gradle
 
 	# ------------------------------------------------------------------
-	# 5. Disable Gradle's SDK auto-install.
+	# 5. Tell Gradle NOT to auto-install SDK components.
 	# ------------------------------------------------------------------
-	# This is what triggers "Failed to read or create install properties
-	# file" when the SDK dir is root-owned. We've already installed the
-	# required components above, so Gradle doesn't need to touch the SDK.
+	# Everything Gradle needs is installed above. Disabling the auto-install
+	# prevents Gradle from writing into the (possibly root-owned) SDK dir,
+	# which is what caused "Failed to read or create install properties file".
 	if ! grep -q '^android\.builder\.sdkDownload=' gradle.properties 2>/dev/null; then
 		echo 'android.builder.sdkDownload=false' >> gradle.properties
 	fi
