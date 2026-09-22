@@ -22,16 +22,6 @@ termux_step_post_get_source() {
 
 # ------------------------------------------------------------------
 # Ensure we have a *writable* AND *usable* Android SDK in $ANDROID_HOME.
-#
-# The official package-builder image sometimes ships an SDK owned by
-# root (mode 0700) at $HOME/lib/android-sdk-<rev>. When that happens,
-# sdkmanager and Gradle both fail with:
-#   "Failed to read or create install properties file"
-#
-# Rather than trying to copy that root-owned SDK (which can be mode
-# 0700 and unreadable by us), we build a fresh, user-owned SDK at
-# $HOME/android-sdk. We only reuse the license hashes, if readable,
-# to avoid re-accepting them.
 # ------------------------------------------------------------------
 termux_am_prepare_sdk() {
 	: "${ANDROID_HOME:="$HOME/lib/android-sdk"}"
@@ -71,21 +61,17 @@ termux_am_prepare_sdk() {
 			}
 		fi
 
-		# Unzip into a temp dir. Layout inside the zip is cmdline-tools/.
-		# We need it at cmdline-tools/latest/ for sdkmanager to run.
 		local tmpdir="$writable/.tmp-cmdline-tools"
 		rm -rf "$tmpdir"
 		mkdir -p "$tmpdir"
 		unzip -q "$sdk_zip" -d "$tmpdir"
 
-		# Clean target directory.
 		rm -rf "$writable/cmdline-tools"
 		mkdir -p "$writable/cmdline-tools"
 
 		if [ -d "$tmpdir/cmdline-tools" ]; then
 			mv "$tmpdir/cmdline-tools" "$writable/cmdline-tools/latest"
 		else
-			# Fallback if the zip layout changes: move everything.
 			mv "$tmpdir" "$writable/cmdline-tools/latest"
 		fi
 		rm -rf "$tmpdir"
@@ -110,7 +96,6 @@ termux_step_make() {
 
 	local SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 	if [ ! -x "$SDK_MANAGER" ]; then
-		# Fallback for older commandlinetools layouts.
 		for cand in \
 			"$ANDROID_HOME/cmdline-tools/bin/sdkmanager" \
 			"$ANDROID_HOME/tools/bin/sdkmanager"; do
@@ -127,12 +112,13 @@ termux_step_make() {
 	fi
 	echo "INFO: Using sdkmanager: $SDK_MANAGER"
 
-	# Accept licenses (guard against `yes` SIGPIPE under `set -e`).
-	yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
+	# Accept licenses. `(yes || true)` swallows the SIGPIPE from `yes` when
+	# sdkmanager closes stdin, so `set -o pipefail` doesn't abort us.
+	(yes || true) | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --licenses
 
 	# Install the exact components Gradle will ask for.
 	# Do NOT swallow errors here — fail fast with a clear message.
-	yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
+	(yes || true) | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
 		"platform-tools" \
 		"build-tools;${_TERMUX_AM_BUILD_TOOLS}" \
 		"platforms;${_TERMUX_AM_PLATFORM}"
@@ -159,13 +145,10 @@ termux_step_make() {
 	mkdir -p $TERMUX_PKG_TMPDIR/gradle
 	unzip -q $TERMUX_PKG_CACHEDIR/gradle-$_GRADLE_VERSION-bin.zip -d $TERMUX_PKG_TMPDIR/gradle
 
-	# Stop Gradle from trying to auto-install SDK components.
 	if ! grep -q '^android\.builder\.sdkDownload=' gradle.properties 2>/dev/null; then
 		echo 'android.builder.sdkDownload=false' >> gradle.properties
 	fi
 
-	# Avoid spawning the gradle daemon due to org.gradle.jvmargs
-	# being set (https://github.com/gradle/gradle/issues/1434):
 	sed -i'' -E '/^org\.gradle\.jvmargs=.*/d' gradle.properties
 
 	export GRADLE_OPTS="-Dorg.gradle.daemon=false -Xmx1536m -Dorg.gradle.java.home=/usr/lib/jvm/java-1.17.0-openjdk-amd64"
