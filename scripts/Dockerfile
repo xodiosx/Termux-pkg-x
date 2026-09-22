@@ -32,8 +32,15 @@ RUN apt-get update && \
 	apt-get remove -yq --autoremove lsb-release software-properties-common && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/* && \
-	su - builder -c "rm ~/lib/*.zip" && \
-	su - builder -c "rm -r ~/.android/cache/"
+	su - builder -c "rm -f ~/lib/*.zip" && \
+	su - builder -c "rm -rf ~/.android/cache/"
+
+# Belt-and-braces: ensure the builder user owns everything under /home/builder,
+# including the Android SDK, NDK, ~/.android, and caches. Without this, an
+# `sdkmanager`-triggered install from Gradle (or any other tool that runs as a
+# different user in a downstream image) can fail with
+# "Failed to read or create install properties file".
+RUN chown -R builder:builder /home/builder
 
 # Switch User
 USER builder:builder
