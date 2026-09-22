@@ -411,10 +411,7 @@ jobs:
         fi
 
   upload:
-    concurrency:
-      group: ${{ github.workflow }}-upload
-      cancel-in-progress: false
-      queue: max
+    concurrency: ${{ github.workflow }}
     permissions:
       contents: read
     if: github.repository == 'termux/termux-packages' && github.ref == 'refs/heads/master'
