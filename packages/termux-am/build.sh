@@ -40,8 +40,8 @@ termux_am_prepare_sdk() {
 	# 1. Prefer the system SDK if it is writable AND has sdkmanager.
 	if [ -w "$ANDROID_HOME" ]; then
 		if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] || \
-		   [ -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ] || \
-		   [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+			[ -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ] || \
+			[ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
 			echo "INFO: Using system SDK at $ANDROID_HOME (writable, has sdkmanager)" >&2
 			export ANDROID_HOME
 			return 0
