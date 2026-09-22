@@ -10,7 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/properties.sh"
 . "$SCRIPT_DIR/build/termux_download.sh"
 
-# ---- 0. Make sure required host tools exist ----
+# ------------------------------------------------------------------
+# 0. Make sure required host tools exist
+# ------------------------------------------------------------------
 need_pkg() {
     command -v "$1" >/dev/null 2>&1 && return 0
     if   command -v apt-get >/dev/null 2>&1; then apt-get update -y && apt-get install -y "$1"
@@ -22,29 +24,6 @@ for p in unzip curl wget; do need_pkg "$p"; done
 if ! command -v java >/dev/null 2>&1; then
     need_pkg openjdk-17-jre-headless || true
 fi
-
-# ---- 0b. Helper: make a directory writable by the current user ----
-# Fixes "Failed to read or create install properties file" from Gradle
-# when the SDK was extracted earlier as root (Docker layer, cached CI
-# volume, etc.). Tries sudo chown, then sudo chmod, then plain chmod.
-ensure_writable() {
-    local dir="$1"
-    [ -z "$dir" ] || [ ! -e "$dir" ] && return 0
-    [ -w "$dir" ] && return 0
-
-    echo "INFO: Fixing permissions on $dir ..." >&2
-    local uid gid
-    uid="$(id -u)"
-    gid="$(id -g)"
-
-    if command -v sudo >/dev/null 2>&1; then
-        sudo chown -R "$uid:$gid" "$dir" 2>/dev/null || \
-        sudo chmod -R u+rwX "$dir"       2>/dev/null || \
-        chmod    -R u+rwX "$dir"         2>/dev/null || true
-    else
-        chmod -R u+rwX "$dir" 2>/dev/null || true
-    fi
-}
 
 ANDROID_SDK_FILE=commandlinetools-linux-${TERMUX_SDK_REVISION}_latest.zip
 ANDROID_SDK_SHA256=0bebf59339eaa534f4217f8aa0972d14dc49e7207be225511073c661ae01da0a
@@ -60,7 +39,9 @@ else
     exit 1
 fi
 
-# ---- 1. Android SDK ----
+# ------------------------------------------------------------------
+# 1. Android SDK
+# ------------------------------------------------------------------
 if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] && \
    [ ! -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]; then
 
@@ -74,7 +55,7 @@ if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] && \
 
     unzip -q "$TERMUX_PKG_TMPDIR/$ANDROID_SDK_FILE" -d "$ANDROID_HOME"
 
-    # zip extracts to cmdline-tools/ ; Android expects cmdline-tools/latest/
+    # cmdline-tools/ → cmdline-tools/latest/
     if [ -d "$ANDROID_HOME/cmdline-tools" ] && \
        [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
         mv "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/cmdline-tools.tmp"
@@ -84,12 +65,11 @@ if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] && \
     fi
 fi
 
-# Ensure the SDK tree and licenses dir are writable by us.
-ensure_writable "$ANDROID_HOME"
 mkdir -p "$ANDROID_HOME/licenses"
-ensure_writable "$ANDROID_HOME/licenses"
 
-# ---- 2. Android NDK ----
+# ------------------------------------------------------------------
+# 2. Android NDK
+# ------------------------------------------------------------------
 if [ ! -d "$NDK" ]; then
     echo "Downloading Android NDK..."
     mkdir -p "$(dirname "$NDK")"
@@ -101,7 +81,6 @@ if [ ! -d "$NDK" ]; then
     rm -rf "$NDK" "$(dirname "$NDK")/android-ndk-r$TERMUX_NDK_VERSION"
     unzip -q "$TERMUX_PKG_TMPDIR/$ANDROID_NDK_FILE" -d "$(dirname "$NDK")"
 
-    # zip extracts to android-ndk-rXX/ -> rename to $NDK
     if [ ! -d "$NDK" ] && [ -d "$(dirname "$NDK")/android-ndk-r$TERMUX_NDK_VERSION" ]; then
         mv "$(dirname "$NDK")/android-ndk-r$TERMUX_NDK_VERSION" "$NDK"
     fi
@@ -109,9 +88,9 @@ if [ ! -d "$NDK" ]; then
     rm -rf "$NDK/sources/cxx-stl/system"
 fi
 
-ensure_writable "$NDK"
-
-# ---- 3. Locate sdkmanager ----
+# ------------------------------------------------------------------
+# 3. Locate sdkmanager
+# ------------------------------------------------------------------
 if   [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
     SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 elif [ -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]; then
@@ -125,34 +104,32 @@ fi
 echo "INFO: Using sdkmanager ... $SDK_MANAGER"
 echo "INFO: Using NDK ... $NDK"
 
-# ---- 4. Fix ownership BEFORE installing packages ----
-# Gradle's auto-install writes an "install properties file" into
-# $ANDROID_HOME/.knownPackages and fails with
-# "Failed to read or create install properties file" if it can't write.
-if command -v sudo >/dev/null 2>&1; then
-    sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME" 2>/dev/null || true
-else
-    chmod -R u+rwX "$ANDROID_HOME" 2>/dev/null || true
-fi
-
-# ---- 5. Install required SDK packages ----
+# ------------------------------------------------------------------
+# 4. Install required SDK packages
+# ------------------------------------------------------------------
 yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
 yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" \
     "platform-tools" \
     "build-tools;${TERMUX_ANDROID_BUILD_TOOLS_VERSION}" \
+    "build-tools;30.0.3" \
     "platforms;android-35" \
+    "platforms;android-33" \
     "platforms;android-28" \
     "platforms;android-24" || true
 
-# ---- 6. Fix ownership AGAIN (sdkmanager may have created root-owned files) ----
-if command -v sudo >/dev/null 2>&1; then
-    sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME" 2>/dev/null || true
-else
-    chmod -R u+rwX "$ANDROID_HOME" 2>/dev/null || true
+# ------------------------------------------------------------------
+# 5. Fix ownership so the build user owns the whole SDK tree.
+# ------------------------------------------------------------------
+# This runs as the user who invoked the script. On the official
+# Dockerfile that user is "builder", so this is a no-op. If anyone
+# runs the script as root (e.g. in a custom image), this ensures the
+# SDK does not end up root-owned and unusable by the build user.
+if [ "$(id -u)" -eq 0 ] && id builder >/dev/null 2>&1; then
+    chown -R builder:builder "$ANDROID_HOME" "$(dirname "$NDK")" 2>/dev/null || true
 fi
 
-# ---- 7. Reminder: also disable Gradle auto-install ----
-# Add to xodosark-app/gradle.properties:
-#   android.builder.sdkDownload=false
-echo "INFO: Make sure android.builder.sdkDownload=false is set in gradle.properties"
+echo "INFO: setup-android-sdk.sh finished"
+echo "INFO: ANDROID_HOME = $ANDROID_HOME"
+echo "INFO: NDK          = $NDK"
+echo "INFO: sdkmanager   = $SDK_MANAGER"
