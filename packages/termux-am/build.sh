@@ -1,85 +1,44 @@
-TERMUX_PKG_HOMEPAGE=https://www.ppsspp.org/
-TERMUX_PKG_DESCRIPTION="PlayStation Portable emulator"
-TERMUX_PKG_LICENSE="GPL-2.0"
-TERMUX_PKG_MAINTAINER="@termux"
-TERMUX_PKG_VERSION="1.20.4"
-TERMUX_PKG_GIT_BRANCH="v${TERMUX_PKG_VERSION}"
-TERMUX_PKG_SRCURL="git+https://github.com/hrydgard/ppsspp"
-TERMUX_PKG_DEPENDS="sdl2, sdl2-ttf, fontconfig, libcurl, glew, libpng, rapidjson, miniupnpc, zstd, zlib, libzip, libsnappy, libcpufeatures, spirv-tools"
-TERMUX_PKG_BUILD_DEPENDS="extra-cmake-modules, libglvnd-dev, vulkan-headers, spirv-headers, mesa-dev"
-TERMUX_PKG_AUTO_UPDATE=true
-TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
--DCMAKE_SYSTEM_NAME=Linux
--DBUILD_TESTING=OFF
--DUSING_EGL=ON
--DUSING_FBDEV=OFF
--DUSING_GLES2=ON
--DUSING_X11_VULKAN=ON
--DUSE_WAYLAND_WSI=OFF
--DUSE_VULKAN_DISPLAY_KHR=OFF
--DUSING_QT_UI=OFF
--DMOBILE_DEVICE=OFF
--DHEADLESS=OFF
--DATLAS_TOOL=ON
--DUNITTEST=OFF
--DUSE_LIBNX=OFF
--DUSE_FFMPEG=ON
--DUSE_DISCORD=OFF
--DUSE_MINIUPNPC=ON
--DUSE_SYSTEM_SNAPPY=ON
--DUSE_SYSTEM_FFMPEG=OFF
--DUSE_SYSTEM_FREETYPE=ON
--DUSE_SYSTEM_LIBCHDR=OFF
--DUSE_SYSTEM_LIBZIP=ON
--DUSE_SYSTEM_LIBSDL2=ON
--DUSE_SYSTEM_LIBPNG=ON
--DUSE_SYSTEM_RAPIDJSON=ON
--DUSE_SYSTEM_ZSTD=ON
--DUSE_SYSTEM_MINIUPNPC=ON
--DUSE_ASAN=OFF
--DUSE_UBSAN=OFF
--DUSE_CCACHE=OFF
--DUSE_NO_MMAP=OFF
-"
+# Contributor: @michalbednarski
+TERMUX_PKG_HOMEPAGE=https://github.com/termux/TermuxAm
+TERMUX_PKG_DESCRIPTION="Android Oreo-compatible am command reimplementation"
+TERMUX_PKG_LICENSE="Apache-2.0"
+TERMUX_PKG_MAINTAINER="Michal Bednarski @michalbednarski"
+TERMUX_PKG_VERSION=0.8.0
+TERMUX_PKG_REVISION=2
+TERMUX_PKG_SRCURL=https://github.com/termux/TermuxAm/archive/refs/tags/v$TERMUX_PKG_VERSION.tar.gz
+TERMUX_PKG_SHA256=7d4cfa2bfff93d5fc89fc89e537d2c072e08918276b140b7ed48ea45ebfbe8f3
+TERMUX_PKG_PLATFORM_INDEPENDENT=true
+TERMUX_PKG_BUILD_IN_SRC=true
+TERMUX_PKG_CONFLICTS="termux-tools (<< 0.51)"
+_GRADLE_VERSION=8.10.2
 
-termux_step_post_extract_package() {
-	# Replace Android ashmem/dlopen(libandroid.so) with POSIX shm emulation
-	# immediately after the source code is cloned.
-	cp -a "$TERMUX_PKG_BUILDER_DIR/Common-MemArenaAndroid.cpp" \
-		"$TERMUX_PKG_SRCDIR/Common/MemArenaAndroid.cpp"
-
-	# Replace placeholder with the real Termux prefix
-	sed -i "s|@TERMUX_PREFIX@|${TERMUX_PREFIX}|g" \
-		"$TERMUX_PKG_SRCDIR/Common/MemArenaAndroid.cpp"
+termux_step_post_get_source() {
+	sed -i'' -E -e "s|\@TERMUX_PREFIX\@|${TERMUX_PREFIX}|g" "$TERMUX_PKG_SRCDIR/am-libexec-packaged"
+	sed -i'' -E -e "s|\@TERMUX_APP_PACKAGE\@|${TERMUX_APP_PACKAGE}|g" "$TERMUX_PKG_SRCDIR/app/src/main/java/com/termux/termuxam/FakeContext.java"
 }
 
-termux_step_pre_configure() {
-	cd "$TERMUX_PKG_SRCDIR"
-	# Replace Android ashmem/dlopen(libandroid.so) with POSIX shm emulation.
-	cp -a "$TERMUX_PKG_BUILDER_DIR/MemArenaAndroid.cpp" \
-		"$TERMUX_PKG_SRCDIR/Common/MemArenaAndroid.cpp"
-	# Replace placeholder with the real Termux prefix.
-	sed -i "s|@TERMUX_PREFIX@|${TERMUX_PREFIX}|g" \
-		"$TERMUX_PKG_SRCDIR/Common/MemArenaAndroid.cpp"
-	# Disable Android-specific test calls
-	sed -i 's/Arm64EmitterTest();/\/\/ Arm64EmitterTest();/' UI/NativeApp.cpp
-	sed -i 's/ArmEmitterTest();/\/\/ ArmEmitterTest();/' UI/NativeApp.cpp
-	# code for building .
+termux_step_make() {
+	# Download and use a new enough gradle version to avoid the process hanging after running:
+	termux_download \
+		https://services.gradle.org/distributions/gradle-$_GRADLE_VERSION-bin.zip \
+		$TERMUX_PKG_CACHEDIR/gradle-$_GRADLE_VERSION-bin.zip \
+		31c55713e40233a8303827ceb42ca48a47267a0ad4bab9177123121e71524c26
+	mkdir $TERMUX_PKG_TMPDIR/gradle
+	unzip -q $TERMUX_PKG_CACHEDIR/gradle-$_GRADLE_VERSION-bin.zip -d $TERMUX_PKG_TMPDIR/gradle
 
-	find \
-		"$TERMUX_PKG_SRCDIR"/Common/GPU \
-		"$TERMUX_PKG_SRCDIR"/Common/Log.h \
-		"$TERMUX_PKG_SRCDIR"/Common/MsgHandler.h \
-		"$TERMUX_PKG_SRCDIR"/ext/naett \
-		"$TERMUX_PKG_SRCDIR"/ppsspp_config.h \
-		-type f -print0 | xargs -0 sed -i \
-		-e 's/\([^A-Za-z0-9_]__ANDROID\)\(__[^A-Za-z0-9_]\)/\1__DISABLING_THIS_BECAUSE_IT_IS_FOR_BUILDING_AN_APK\2/g' \
-		-e 's/\([^A-Za-z0-9_]__ANDROID\)__$/\1_DISABLING_THIS_BECAUSE_IT_IS_FOR_BUILDING_AN_APK__/g'
+	# Avoid spawning the gradle daemon due to org.gradle.jvmargs
+	# being set (https://github.com/gradle/gradle/issues/1434):
+	sed -i'' -E '/^org\.gradle\.jvmargs=.*/d' gradle.properties
+
+	export ANDROID_HOME
+	export GRADLE_OPTS="-Dorg.gradle.daemon=false -Xmx1536m -Dorg.gradle.java.home=/usr/lib/jvm/java-1.17.0-openjdk-amd64"
+
+	$TERMUX_PKG_TMPDIR/gradle/gradle-$_GRADLE_VERSION/bin/gradle \
+		:app:assembleRelease
 }
 
-
-termux_step_post_make_install() {
-	# Create a convenience symlink: ppsspp -> PPSSPPSDL
-	cd $TERMUX_PREFIX/bin
-	ln -sf PPSSPPSDL "$TERMUX_PREFIX/bin/ppsspp"
+termux_step_make_install() {
+	cp $TERMUX_PKG_SRCDIR/am-libexec-packaged $TERMUX_PREFIX/bin/am
+	mkdir -p $TERMUX_PREFIX/libexec/termux-am
+	cp $TERMUX_PKG_SRCDIR/app/build/outputs/apk/release/app-release-unsigned.apk $TERMUX_PREFIX/libexec/termux-am/am.apk
 }
