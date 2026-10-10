@@ -104,6 +104,14 @@ jobs:
         xargs -0 -r -n50 sed -i 's/com\.termux/app.xodos2/g'
         grep -nE '^TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh || true
 
+    # =================================================================
+    # Patch termux-tools:
+    #   - Wipe mirrors/ entirely, put ONE file (default) with our URL.
+    #   - Remove termux-change-repo (nothing to change).
+    #   - Replace pkg with a wrapper that ignores the mirror system.
+    # All shell uses tabs (Termux lint requires it), so we write the
+    # patch with 2-space indentation and convert to tabs via awk.
+    # =================================================================
     - name: Patch termux-tools for custom repo (tab-indented)
       run: |
         set -euo pipefail
@@ -116,6 +124,7 @@ jobs:
           TERMUX_PKG_CONFFILES="$(cat "$TERMUX_PKG_BUILDDIR/conffiles")"
 
           MIRROR_DIR="$TERMUX_PREFIX/etc/termux/mirrors"
+          rm -rf "$MIRROR_DIR"
           mkdir -p "$MIRROR_DIR"
           cat > "$MIRROR_DIR/default" <<'MIRROREOF'
         # This file is sourced by pkg
@@ -123,13 +132,45 @@ jobs:
         MAIN="https://xodiosx.github.io/Termux-pkg-x"
         MIRROREOF
 
-          PKG="$TERMUX_PREFIX/bin/pkg"
-          if [ -f "$PKG" ]; then
-            if ! grep -q 'FORCED_BY_XODIOSX' "$PKG"; then
-              awk 'NR==1 { print; print "# FORCED_BY_XODIOSX: force default mirror"; print "MIRROR_GROUP=\"default\""; print "export MIRROR_GROUP"; next } { print }' "$PKG" > "$PKG.new" && mv "$PKG.new" "$PKG"
-            fi
-            sed -i 's|deb \$MAIN|deb [trusted=yes] \$MAIN|g' "$PKG" || true
-          fi
+          rm -f "$TERMUX_PREFIX/bin/termux-change-repo"
+
+          cat > "$TERMUX_PREFIX/bin/pkg" <<'PKGEOF'
+        #!/data/data/app.xodos2/files/usr/bin/bash
+        TERMUX_PREFIX=/data/data/app.xodos2/files/usr
+        export PATH="$TERMUX_PREFIX/bin:$PATH"
+        export TERMUX_PREFIX
+        CMD="$1"
+        shift 2>/dev/null || true
+        case "$CMD" in
+          up|update) exec apt update "$@" ;;
+          upgrade) exec apt upgrade "$@" ;;
+          full-upgrade) exec apt full-upgrade "$@" ;;
+          install) exec apt install "$@" ;;
+          reinstall) exec apt install --reinstall "$@" ;;
+          downgrade) exec apt install --allow-downgrades "$@" ;;
+          uninstall|remove) exec apt remove "$@" ;;
+          purge) exec apt purge "$@" ;;
+          autoremove) exec apt autoremove "$@" ;;
+          autoclean) exec apt autoclean "$@" ;;
+          clean) exec apt clean "$@" ;;
+          list) exec apt list "$@" ;;
+          list-all) exec apt list --all-versions "$@" ;;
+          list-installed) exec apt list --installed "$@" ;;
+          list-upgradable) exec apt list --upgradable "$@" ;;
+          search) exec apt search "$@" ;;
+          show) exec apt show "$@" ;;
+          files) exec dpkg -L "$@" ;;
+          hold|unhold) exec apt-mark "$CMD" "$@" ;;
+          ""|help|-h|--help)
+            echo "Usage: pkg <command> [args]"
+            echo "Commands: up upgrade full-upgrade install reinstall remove"
+            echo "          purge autoremove clean list list-all list-installed"
+            echo "          list-upgradable search show files hold unhold"
+            ;;
+          *) echo "pkg: unknown command '$CMD'" >&2; exit 1 ;;
+        esac
+        PKGEOF
+          chmod +x "$TERMUX_PREFIX/bin/pkg"
         }
         RAWEOF
 
@@ -240,7 +281,7 @@ jobs:
             if [ -z "$pkg" ]; then continue; fi
             case "$pkg" in
               vkmark)
-                echo "::warning::Skipping '$pkg' — upstream Vulkan-Hpp removed isDispatchLoader"
+                echo "::warning::Skipping '$pkg'"
                 continue
                 ;;
             esac
@@ -359,21 +400,14 @@ jobs:
         set -uo pipefail
         mkdir -p debs artifacts output
 
-        echo ">>> termux-packages/output contents:"
         if [ -d termux-packages/output ]; then
-          find termux-packages/output -maxdepth 1 -type f | head -40 || true
           find termux-packages/output -maxdepth 1 -type f -print0 2>/dev/null \
             | xargs -0r mv -t ./output/ 2>/dev/null || true
         fi
 
-        echo ">>> ./output contents:"
-        find output -maxdepth 1 -type f | head -40 || true
-
-        # Copy every .deb from ./output into debs/
         find output -maxdepth 1 -type f -name '*.deb' -print0 2>/dev/null \
           | xargs -0r mv -t debs/ 2>/dev/null || true
 
-        # Also move built_*.txt lists
         for repo in $(jq --raw-output 'del(.pkg_format) | .[].name' repo.json); do
           if [ -f "./built_${repo}_packages.txt" ]; then
             mv "./built_${repo}_packages.txt" ./debs/ || true
@@ -386,11 +420,8 @@ jobs:
 
         n=$(find debs -type f -name '*.deb' 2>/dev/null | wc -l)
         echo ">>> debs/ contains: ${n} .deb files"
-        find debs -type f -name '*.deb' > /tmp/debs-final.txt 2>/dev/null || true
-        head -20 /tmp/debs-final.txt || true
 
         tar cf "artifacts/debs-${{ matrix.target_arch }}-${{ github.sha }}.tar" debs
-        echo ">>> tar contents (first 20):"
         tar tf "artifacts/debs-${{ matrix.target_arch }}-${{ github.sha }}.tar" | head -20 || true
 
     - name: Store *.deb files
@@ -415,11 +446,6 @@ jobs:
     - uses: actions/download-artifact@v6
       with: { path: ./all-artifacts }
 
-    # =================================================================
-    # FIXED: use `find` to locate debs-*.tar files, not a glob. The
-    # artifact layout may be flat (all-artifacts/debs-*.tar) OR nested
-    # (all-artifacts/debs-<name>/debs-*.tar). find covers both.
-    # =================================================================
     - name: Extract .deb files from tarballs
       run: |
         set -euo pipefail
@@ -446,12 +472,9 @@ jobs:
         echo ">>> found ${count} .deb files"
         if [ "$count" -eq 0 ]; then
           echo "::error::No .deb files found inside the extracted tars"
-          echo ">>> release-debs tree:"
           find release-debs -maxdepth 3 -type f | head -30 || true
           exit 1
         fi
-
-        find release-debs -type f -name '*.deb' | sort | head -20 || true
 
     - name: Upload .deb files
       run: |
@@ -477,12 +500,7 @@ jobs:
             fi
             sleep "$backoff"
           done
-          if [ "$ok" -eq 1 ]; then
-            echo ok
-          else
-            echo "FAILED: $(basename "$f")"
-            failed=$((failed + 1))
-          fi
+          if [ "$ok" -eq 1 ]; then echo ok; else echo "FAILED: $(basename "$f")"; failed=$((failed + 1)); fi
           sleep 1
         done
         if [ "$failed" -gt 0 ]; then
