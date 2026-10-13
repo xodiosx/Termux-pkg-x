@@ -8,23 +8,23 @@ on:
         required: true
         default: "xodiosx/termux-packages"
       tags:
-        description: "Space/comma separated tags to merge. Leave empty to auto-discover xodos-XoDos-<repo>-p<N>-* tags."
+        description: "Space/comma separated tags. Leave empty to auto-discover."
         required: false
         default: ""
       repos:
-        description: "Comma-separated repos to auto-discover (main,x11,root,glibc). Ignored if tags provided."
+        description: "Comma-separated repos to auto-discover."
         required: false
         default: "main,x11,root,glibc"
       keep_old:
-        description: "Keep existing metadata in docs/xodos-*/ from previous runs"
+        description: "Keep existing metadata in docs/xodos-*/"
         type: boolean
         default: true
       push_batch_size:
-        description: "Files per git commit+push batch"
+        description: "Files per git push batch"
         required: false
         default: "150"
       max_deb_mb:
-        description: "Skip .deb files larger than this from the Pages repo. Set 0 to reference EVERY .deb by URL (recommended)."
+        description: "Skip .deb files larger than this. 0 = reference ALL .deb by URL (recommended)"
         required: false
         default: "0"
 
@@ -39,6 +39,7 @@ jobs:
   generate-repo:
     runs-on: ubuntu-24.04
     steps:
+
     - name: Checkout repository (Pages repo)
       uses: actions/checkout@v6
       with:
@@ -52,14 +53,27 @@ jobs:
 
     - name: Ensure .gitattributes protects binary files
       run: |
-        set -euo pipefail
         if [ ! -f .gitattributes ]; then
           printf '%s\n' \
-            '*.deb binary' '*.ddeb binary' '*.gz binary' '*.xz binary' \
-            '*.zst binary' '*.tar binary' '*.zip binary' \
-            '*.png binary' '*.jpg binary' '*.jpeg binary' '*.gif binary' \
-            '*.ico binary' '*.so binary' '*.a binary' '*.o binary' \
-            '*.woff binary' '*.woff2 binary' '*.ttf binary' '*.otf binary' \
+            '*.deb binary' \
+            '*.ddeb binary' \
+            '*.gz binary' \
+            '*.xz binary' \
+            '*.zst binary' \
+            '*.tar binary' \
+            '*.zip binary' \
+            '*.png binary' \
+            '*.jpg binary' \
+            '*.jpeg binary' \
+            '*.gif binary' \
+            '*.ico binary' \
+            '*.so binary' \
+            '*.a binary' \
+            '*.o binary' \
+            '*.woff binary' \
+            '*.woff2 binary' \
+            '*.ttf binary' \
+            '*.otf binary' \
             '*.pdf binary' > .gitattributes
         else
           grep -q '^\s*\*\.deb binary' .gitattributes || echo '*.deb binary' >> .gitattributes
@@ -124,12 +138,11 @@ jobs:
           exit 1
         fi
 
-        echo ">>> Grouped:"
-        sort -u -k1,1 /tmp/plan/groups.txt | awk -F'\t' '{print "    "$1}'
         echo ">>> Full mapping:"
         sort /tmp/plan/groups.txt | sed 's/^/    /'
         echo ">>> Repos present:"
-        cut -f1 /tmp/plan/groups.txt | sort -u | tee /tmp/plan/repos.txt | sed 's/^/    /'
+        cut -f1 /tmp/plan/groups.txt | sort -u > /tmp/plan/repos.txt
+        sed 's/^/    /' /tmp/plan/repos.txt
 
     - name: Download .deb files from all parts
       env:
@@ -142,12 +155,13 @@ jobs:
         : > /tmp/deb-tags.tsv
 
         while IFS= read -r repo; do
+          [ -z "$repo" ] && continue
           echo "=================================================="
           echo ">>> repo: $repo"
           echo "=================================================="
           mkdir -p "/tmp/raw-debs/$repo"
 
-          grep -P "^${repo}\t" /tmp/plan/groups.txt | cut -f2 | while IFS= read -r tag; do
+          while IFS= read -r tag; do
             [ -z "$tag" ] && continue
             echo ">>> downloading from tag: $tag"
             tmpdir=$(mktemp -d)
@@ -156,7 +170,8 @@ jobs:
             then
               echo ">>> WARN: download failed for $tag"
               head -5 /tmp/dl_err.log || true
-              rm -rf "$tmpdir"; continue
+              rm -rf "$tmpdir"
+              continue
             fi
             n=$(find "$tmpdir" -maxdepth 1 -type f -name '*.deb' | wc -l)
             echo "    downloaded $n .deb file(s)"
@@ -166,7 +181,7 @@ jobs:
             find "$tmpdir" -maxdepth 1 -type f -name '*.deb' -print0 \
               | xargs -0r mv -t "/tmp/raw-debs/$repo/"
             rm -rf "$tmpdir"
-          done
+          done < <(grep -P "^${repo}\t" /tmp/plan/groups.txt | cut -f2)
 
           total=$(find "/tmp/raw-debs/$repo" -maxdepth 1 -type f -name '*.deb' | wc -l)
           echo ">>> repo $repo: $total .deb file(s)"
@@ -185,6 +200,7 @@ jobs:
         : > /tmp/large-external.tsv
 
         while IFS= read -r repo; do
+          [ -z "$repo" ] && continue
           case "$repo" in
             main)  dist=stable; comp=main ;;
             x11)   dist=x11;    comp=main ;;
@@ -205,14 +221,18 @@ jobs:
             rm -rf "$outdir"
           fi
           mkdir -p "$pooldir"
+          touch "${pooldir}/.gitkeep"
 
-          tsv="/tmp/all-${repo}.tsv"; : > "$tsv"
-          valid=0; invalid=0
+          tsv="/tmp/all-${repo}.tsv"
+          : > "$tsv"
+          valid=0
+          invalid=0
           shopt -s nullglob
           for deb in /tmp/raw-debs/"$repo"/*.deb; do
             if ! dpkg-deb -I "$deb" >/dev/null 2>&1; then
               echo ">>> SKIP invalid: $(basename "$deb")"
-              invalid=$((invalid + 1)); continue
+              invalid=$((invalid + 1))
+              continue
             fi
             pkg=$(dpkg-deb -f "$deb" Package)
             ver=$(dpkg-deb -f "$deb" Version)
@@ -226,7 +246,8 @@ jobs:
           winners="/tmp/winners-${repo}.tsv"
           sort -t$'\t' -k1,1 -k2,2rV "$tsv" | awk -F'\t' '!seen[$1]++' > "$winners"
 
-          placed=0; skipped_large=0
+          placed=0
+          skipped_large=0
           while IFS=$'\t' read -r pkg ver size path; do
             [ -z "$pkg" ] && continue
             if [ "$size" -gt "$MAX_BYTES" ]; then
@@ -258,16 +279,13 @@ jobs:
         echo ""
         echo ">>> total external: $(wc -l < /tmp/large-external.tsv)"
 
-    # ==================================================================
-    # Generate Packages indexes. Rewrite Filename for external .deb
-    # files using PURE AWK — no heredocs, no indentation traps.
-    # ==================================================================
     - name: Generate Packages indexes
       run: |
         set -euo pipefail
         : > /tmp/override.empty
 
         while IFS= read -r repo; do
+          [ -z "$repo" ] && continue
           case "$repo" in
             main)  dist=stable; comp=main ;;
             x11)   dist=x11;    comp=main ;;
@@ -292,7 +310,7 @@ jobs:
           if [ -s /tmp/large-external.tsv ]; then
             for arch in aarch64 all; do
               f="${outdir}/dists/${dist}/${comp}/binary-${arch}/Packages"
-              [ -f "$f" ] || continue
+              if [ ! -f "$f" ]; then continue; fi
               awk -F'\t' '
                 NR==FNR { url[$1]=$2; next }
                 /^Package: / { pkg=substr($0,10); print; next }
@@ -311,6 +329,7 @@ jobs:
       run: |
         set -euo pipefail
         while IFS= read -r repo; do
+          [ -z "$repo" ] && continue
           case "$repo" in
             main)  dist=stable; comp=main ;;
             x11)   dist=x11;    comp=main ;;
@@ -320,7 +339,7 @@ jobs:
           esac
           for arch in aarch64 all; do
             f="docs/xodos-${repo}/dists/${dist}/${comp}/binary-${arch}/Packages"
-            [ -f "$f" ] || continue
+            if [ ! -f "$f" ]; then continue; fi
             gzip -kf -9 "$f"
             rm -f "$f.xz"
           done
@@ -330,6 +349,7 @@ jobs:
       run: |
         set -euo pipefail
         while IFS= read -r repo; do
+          [ -z "$repo" ] && continue
           case "$repo" in
             main)  dist=stable; comp=main;   label="xodos Termux main" ;;
             x11)   dist=x11;    comp=main;   label="xodos Termux x11" ;;
@@ -337,16 +357,18 @@ jobs:
             glibc) dist=glibc;  comp=main;   label="xodos Termux glibc" ;;
             *)     continue ;;
           esac
+
           conf="/tmp/apt-ftparchive-${repo}.conf"
-          cat > "$conf" <<EOF
-         APT::FTPArchive::Release::Origin "xodos";
-         APT::FTPArchive::Release::Label "${label}";
-         APT::FTPArchive::Release::Suite "${dist}";
-         APT::FTPArchive::Release::Codename "${dist}";
-         APT::FTPArchive::Release::Architectures "aarch64 all";
-         APT::FTPArchive::Release::Components "${comp}";
-         APT::FTPArchive::Release::Description "xodos custom Termux ${repo} packages";
-         EOF
+          {
+            echo 'APT::FTPArchive::Release::Origin "xodos";'
+            echo "APT::FTPArchive::Release::Label \"${label}\";"
+            echo "APT::FTPArchive::Release::Suite \"${dist}\";"
+            echo "APT::FTPArchive::Release::Codename \"${dist}\";"
+            echo 'APT::FTPArchive::Release::Architectures "aarch64 all";'
+            echo "APT::FTPArchive::Release::Components \"${comp}\";"
+            echo "APT::FTPArchive::Release::Description \"xodos custom Termux ${repo} packages\";"
+          } > "$conf"
+
           cd "docs/xodos-${repo}"
           apt-ftparchive -c "$conf" release "dists/${dist}" > "dists/${dist}/Release"
           cp "dists/${dist}/Release" "dists/${dist}/InRelease"
@@ -359,9 +381,12 @@ jobs:
         set -euo pipefail
         fail=0
         while IFS= read -r repo; do
+          [ -z "$repo" ] && continue
           pkg_file=$(find "docs/xodos-${repo}/dists" -type f -name 'Packages' | head -1)
           if [ -z "$pkg_file" ]; then
-            echo "::error::No Packages for xodos-${repo}"; fail=$((fail+1)); continue
+            echo "::error::No Packages for xodos-${repo}"
+            fail=$((fail+1))
+            continue
           fi
           bad=0
           while IFS= read -r line; do
@@ -371,14 +396,20 @@ jobs:
             esac
           done < <(grep '^Filename:' "$pkg_file" || true)
           if [ "$bad" -gt 0 ]; then
-            echo "::error::$bad bad Filename entries in $repo"; fail=$((fail+1))
+            echo "::error::$bad bad Filename entries in $repo"
+            fail=$((fail+1))
           fi
           rel_file=$(find "docs/xodos-${repo}/dists" -type f -name 'Release' | head -1)
-          [ -z "$rel_file" ] && { echo "::error::No Release for $repo"; fail=$((fail+1)); }
+          if [ -z "$rel_file" ]; then
+            echo "::error::No Release for $repo"
+            fail=$((fail+1))
+          fi
           ndeb=$(find "docs/xodos-${repo}/pool" -type f -name '*.deb' 2>/dev/null | wc -l)
           echo "  xodos-${repo}: $ndeb .deb in pool, index=$pkg_file"
         done < /tmp/plan/repos.txt
-        [ "$fail" -gt 0 ] && exit 1
+        if [ "$fail" -gt 0 ]; then
+          exit 1
+        fi
 
         echo ""
         echo ">>> docs/ total size:"
@@ -407,13 +438,16 @@ jobs:
         total=$(wc -l < /tmp/changed-files.txt)
         echo ">>> total changed files: $total"
         if [ "$total" -eq 0 ]; then
-          echo ">>> no changes — nothing to push"; exit 0
+          echo ">>> no changes — nothing to push"
+          exit 0
         fi
         git reset -q
 
         BATCH="${BATCH_SIZE:-150}"
-        case "$BATCH" in ''|*[!0-9]*) BATCH=150 ;; esac
-        [ "$BATCH" -lt 20 ] && BATCH=20
+        case "$BATCH" in
+          ''|*[!0-9]*) BATCH=150 ;;
+        esac
+        if [ "$BATCH" -lt 20 ]; then BATCH=20; fi
 
         batches=$(( (total + BATCH - 1) / BATCH ))
         echo ">>> pushing in $batches batch(es) of $BATCH"
@@ -423,7 +457,8 @@ jobs:
           for attempt in 1 2 3 4 5; do
             echo "    push attempt $attempt/5 ..."
             if git push origin HEAD 2>/tmp/push_err.log; then
-              echo "    push ok"; return 0
+              echo "    push ok"
+              return 0
             fi
             tail -5 /tmp/push_err.log | sed 's/^/        /' || true
             if grep -q 'GH001\|exceeds GitHub.s file size limit\|pre-receive hook declined' /tmp/push_err.log; then
@@ -435,10 +470,12 @@ jobs:
           return 1
         }
 
-        i=0; batch_num=0
+        i=0
+        batch_num=0
         while [ "$i" -lt "$total" ]; do
           batch_num=$(( batch_num + 1 ))
-          end=$(( i + BATCH )); [ "$end" -gt "$total" ] && end=$total
+          end=$(( i + BATCH ))
+          if [ "$end" -gt "$total" ]; then end=$total; fi
           echo ">>> batch $batch_num/$batches (files $((i+1))..$end)"
           sed -n "$((i+1)),${end}p" /tmp/changed-files.txt > /tmp/batch-list.txt
           while IFS= read -r f; do
@@ -447,15 +484,19 @@ jobs:
           done < /tmp/batch-list.txt
 
           if git diff --cached --quiet; then
-            echo "    nothing staged — skipping"; i=$end; continue
+            echo "    nothing staged — skipping"
+            i=$end
+            continue
           fi
 
           git commit -q -m "Update APT repository (batch $batch_num/$batches) [skip ci]" \
             -m "Source: ${{ inputs.source_repo }}" || {
-              echo "::error::commit failed for batch $batch_num"; exit 1
+              echo "::error::commit failed for batch $batch_num"
+              exit 1
             }
           if ! push_with_retry; then
-            echo "::error::push failed for batch $batch_num"; exit 1
+            echo "::error::push failed for batch $batch_num"
+            exit 1
           fi
           i=$end
         done
@@ -466,12 +507,14 @@ jobs:
         {
           echo "## APT Repositories Generated"
           echo ""
-          echo "Source: \`${{ inputs.source_repo }}\`"
-          echo "Base URL: \`https://xodiosx.github.io/Termux-pkg-x/\`"
+          echo "Source: ${{ inputs.source_repo }}"
+          echo ""
+          echo "Base URL: https://xodiosx.github.io/Termux-pkg-x/"
           echo ""
           echo "### sources.list entries"
           echo '```'
           while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
             case "$repo" in
               main)  d=stable; c=main ;;
               x11)   d=x11;    c=main ;;
@@ -482,6 +525,4 @@ jobs:
             echo "deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x/xodos-${repo} ${d} ${c}"
           done < /tmp/plan/repos.txt
           echo '```'
-          echo ""
-          echo "External .deb references: $(wc -l < /tmp/large-external.tsv 2>/dev/null || echo 0)"
         } >> $GITHUB_STEP_SUMMARY
