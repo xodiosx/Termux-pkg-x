@@ -1,0 +1,32 @@
+Architectures: aarch64 all
+Codename: root
+Components: stable
+Date: Tue, 13 Oct 2026 19:23:04 +0000
+Description: xodos custom Termux root packages
+Label: xodos Termux root
+Origin: xodos
+Suite: root
+MD5Sum:
+ 6aa4db2f130ae99146011e1d4eb88799              197 Release
+ e86a8fa82d858e632c2c1869df7b832e            48047 stable/binary-aarch64/Packages
+ cedbab4da01219577701b1733f7b6689            16949 stable/binary-aarch64/Packages.gz
+ b9925a0940bc0ecd8ddf242f9afb2289              903 stable/binary-all/Packages
+ fa372b0cf1c989435cf730e26232bc24              551 stable/binary-all/Packages.gz
+SHA1:
+ 2d2335f4513399a793d6a9d5ebf77142c8624dbe              197 Release
+ abd9b81454690630b3891fa350262d48ecdbaac4            48047 stable/binary-aarch64/Packages
+ b3b85681deffc3462ab207a421e5831c85e27b45            16949 stable/binary-aarch64/Packages.gz
+ 3bd3537e502346d6a6924a7fdde6bb0112d89d4e              903 stable/binary-all/Packages
+ 1c9f8905246eb3fe9315935cf2cf20db84bbcb20              551 stable/binary-all/Packages.gz
+SHA256:
+ 3eaeefe90eef38ac83008d61f309f25c74fba73922ecd5496358b0cf3e5b3034              197 Release
+ ee308f627b88047ab8e3cebee4771f8c46058b9db84e361661633f866287f24a            48047 stable/binary-aarch64/Packages
+ fd9e6d94dae83b8292dfffd48fa3bcb832546838a310bb362d5d9eae8893a1bb            16949 stable/binary-aarch64/Packages.gz
+ b68a6c940269dac755c250255560620d8d7c88522f6ea5a521a609b1b001133c              903 stable/binary-all/Packages
+ 4739ce43a50b86d119df74a3b556fbeaaa0ceb4e8bb90deee826cbd2dd9b8e86              551 stable/binary-all/Packages.gz
+SHA512:
+ 8483e14586ca5029e769055fe661fdb50c13ef01dfb58074c389c035a15cd68265d79dcdab2ebfd3a21d47bbd4192bf97679f6a3184b96076d5c8915338fbb3a              197 Release
+ 04043ee7affb895b61710548394504871fe43e4efddb18e9abb5ce6db308a45e5d77151cb7a807e9d0b1026988baaa4cda8f00d340b4e85d05f762eec3970f81            48047 stable/binary-aarch64/Packages
+ 3e96734fd424cdb05d491afd86dae470c5c492de668095d50b2a41a5b9970c1ca53d2d9bfb39779029c0ee50ae947393070e6e05bc60b0d1bceab908b61de5a4            16949 stable/binary-aarch64/Packages.gz
+ d6029666c1606550e6651535af76681b18d35bc0db92f6a7aabff8202be4d6c1fea376c0a41147a000f45fd680a4bf69f9cc43b2a56389c3140ca49e6105a36a              903 stable/binary-all/Packages
+ 35d77331dd79e3d4dde006aebd94f4e6fa1dfe3d47db39e11d54f5f1a6e9339088d28848e5a04abdc5b6b0a9da99aa652b9db5b724068e32a5ffcc95b9fbef0e              551 stable/binary-all/Packages.gz
