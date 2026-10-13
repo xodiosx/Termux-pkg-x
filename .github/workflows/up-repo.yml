@@ -339,14 +339,14 @@ jobs:
           esac
           conf="/tmp/apt-ftparchive-${repo}.conf"
           cat > "$conf" <<EOF
-APT::FTPArchive::Release::Origin "xodos";
-APT::FTPArchive::Release::Label "${label}";
-APT::FTPArchive::Release::Suite "${dist}";
-APT::FTPArchive::Release::Codename "${dist}";
-APT::FTPArchive::Release::Architectures "aarch64 all";
-APT::FTPArchive::Release::Components "${comp}";
-APT::FTPArchive::Release::Description "xodos custom Termux ${repo} packages";
-EOF
+         APT::FTPArchive::Release::Origin "xodos";
+         APT::FTPArchive::Release::Label "${label}";
+         APT::FTPArchive::Release::Suite "${dist}";
+         APT::FTPArchive::Release::Codename "${dist}";
+         APT::FTPArchive::Release::Architectures "aarch64 all";
+         APT::FTPArchive::Release::Components "${comp}";
+         APT::FTPArchive::Release::Description "xodos custom Termux ${repo} packages";
+         EOF
           cd "docs/xodos-${repo}"
           apt-ftparchive -c "$conf" release "dists/${dist}" > "dists/${dist}/Release"
           cp "dists/${dist}/Release" "dists/${dist}/InRelease"
