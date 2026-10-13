@@ -20,9 +20,13 @@ on:
         type: boolean
         default: true
       push_batch_size:
-        description: "Files per git commit+push batch (lower = safer, more pushes)"
+        description: "Files per git commit+push batch"
         required: false
         default: "150"
+      max_deb_mb:
+        description: "Skip files larger than this (MB) from the Pages repo; they will be referenced by URL on the source release"
+        required: false
+        default: "95"
 
 permissions:
   contents: write
@@ -89,7 +93,6 @@ jobs:
         set -euo pipefail
         mkdir -p /tmp/plan
         : > /tmp/plan/tags.txt
-
         echo ">>> Source repo for releases: $SRC"
 
         if [ -n "$INPUT_TAGS" ]; then
@@ -102,8 +105,7 @@ jobs:
           echo ">>> Auto-discovering tags in $SRC for repos: $INPUT_REPOS"
           REPOS_ALT=$(echo "$INPUT_REPOS" | tr ',' '|')
           mapfile -t TAGS < <(
-            gh release list --repo "$SRC" \
-              --limit 1000 \
+            gh release list --repo "$SRC" --limit 1000 \
               --json tagName,createdAt \
               --jq "sort_by(.createdAt) | .[].tagName | select(test(\"^xodos-XoDos-(${REPOS_ALT})-p[0-9]+-\"))"
           )
@@ -123,37 +125,25 @@ jobs:
         python3 << 'PYEOF'
         import re, json
         from collections import defaultdict
-
         TAGS = [l.strip() for l in open("/tmp/plan/tags.txt") if l.strip()]
         PAT = re.compile(r'^xodos-XoDos-(main|x11|root|glibc)-p(\d+)-(.+)$')
-
-        groups = defaultdict(list)
-        unparsed = []
+        groups = defaultdict(list); unparsed = []
         for t in TAGS:
             m = PAT.match(t)
-            if not m:
-                unparsed.append(t); continue
+            if not m: unparsed.append(t); continue
             repo, part, ts = m.group(1), int(m.group(2)), m.group(3)
             groups[repo].append({"tag": t, "part": part, "timestamp": ts})
-
         for r in groups:
             groups[r].sort(key=lambda x: (x["part"], x["timestamp"]))
-
-        print(">>> Parsed grouping:")
         for r, items in sorted(groups.items()):
             print(f"    {r}: {len(items)} part(s)")
-            for it in items:
-                print(f"        p{it['part']}  {it['tag']}")
-
+            for it in items: print(f"        p{it['part']}  {it['tag']}")
         if unparsed:
-            print(">>> WARNING: tags that don't match the pattern:")
-            for u in unparsed:
-                print(f"        {u}")
-        if not groups:
-            raise SystemExit("No tags could be parsed")
+            print(">>> WARNING: unparsed tags:")
+            for u in unparsed: print(f"        {u}")
+        if not groups: raise SystemExit("No tags could be parsed")
         json.dump(groups, open("/tmp/plan/groups.json","w"), indent=2)
         PYEOF
-        cat /tmp/plan/groups.json
 
     - name: Download .deb files from all parts
       env:
@@ -163,6 +153,7 @@ jobs:
         set -euo pipefail
         rm -rf /tmp/raw-debs
         mkdir -p /tmp/raw-debs
+        : > /tmp/deb-tags.tsv
 
         for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
           echo "=================================================="
@@ -174,10 +165,8 @@ jobs:
             [ -z "$tag" ] && continue
             echo ">>> downloading from tag: $tag"
             tmpdir=$(mktemp -d)
-            if ! gh release download "$tag" \
-                   --repo "$SRC" \
-                   --pattern "*.deb" \
-                   --dir "$tmpdir" 2>/tmp/dl_err.log
+            if ! gh release download "$tag" --repo "$SRC" \
+                   --pattern "*.deb" --dir "$tmpdir" 2>/tmp/dl_err.log
             then
               echo ">>> WARN: download failed for $tag"
               head -5 /tmp/dl_err.log || true
@@ -185,20 +174,31 @@ jobs:
             fi
             n=$(find "$tmpdir" -maxdepth 1 -type f -name '*.deb' | wc -l)
             echo "    downloaded $n .deb file(s)"
+            while IFS= read -r -d '' deb; do
+              printf '%s\t%s\n' "$(basename "$deb")" "$tag" >> /tmp/deb-tags.tsv
+            done < <(find "$tmpdir" -maxdepth 1 -type f -name '*.deb' -print0)
             find "$tmpdir" -maxdepth 1 -type f -name '*.deb' -print0 \
               | xargs -0r mv -t "/tmp/raw-debs/$repo/"
             rm -rf "$tmpdir"
           done < <(jq -r --arg r "$repo" '.[$r][] | .tag' /tmp/plan/groups.json)
 
           total=$(find "/tmp/raw-debs/$repo" -maxdepth 1 -type f -name '*.deb' | wc -l)
-          echo ">>> repo $repo: $total .deb file(s) total"
+          echo ">>> repo $repo: $total .deb file(s)"
         done
 
     - name: Build per-repo pool
+      env:
+        MAX_DEB_MB: ${{ inputs.max_deb_mb }}
+        SRC: ${{ inputs.source_repo }}
       run: |
         set -euo pipefail
         declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
         declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
+
+        MAX_BYTES=$(( ${MAX_DEB_MB:-95} * 1024 * 1024 ))
+        echo ">>> max_deb_mb=${MAX_DEB_MB}  ($MAX_BYTES bytes)"
+
+        : > /tmp/large-external.tsv
 
         for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
           echo "=================================================="
@@ -210,14 +210,12 @@ jobs:
           pooldir="${outdir}/pool/${comp}"
 
           if [ "${{ inputs.keep_old }}" != "true" ]; then
-            echo ">>> keep_old=false — wiping ${outdir}"
             rm -rf "$outdir"
           fi
           mkdir -p "$pooldir"
 
-          tsv="/tmp/all-${repo}.tsv"
-          : > "$tsv"
-          valid=0; invalid=0
+          tsv="/tmp/all-${repo}.tsv"; : > "$tsv"
+          valid=0; invalid=0; skipped_large=0
           shopt -s nullglob
           for deb in /tmp/raw-debs/"$repo"/*.deb; do
             if ! dpkg-deb -I "$deb" >/dev/null 2>&1; then
@@ -226,20 +224,34 @@ jobs:
             fi
             pkg=$(dpkg-deb -f "$deb" Package)
             ver=$(dpkg-deb -f "$deb" Version)
-            printf '%s\t%s\t%s\n' "$pkg" "$ver" "$deb" >> "$tsv"
+            size=$(stat -c %s "$deb")
+            printf '%s\t%s\t%s\t%s\n' "$pkg" "$ver" "$size" "$deb" >> "$tsv"
             valid=$((valid + 1))
           done
           shopt -u nullglob
           echo ">>> valid=${valid} invalid=${invalid}"
 
           winners="/tmp/winners-${repo}.tsv"
-          sort -t$'\t' -k1,1 -k2,2rV "$tsv" \
-            | awk -F'\t' '!seen[$1]++' \
-            > "$winners"
+          sort -t$'\t' -k1,1 -k2,2rV "$tsv" | awk -F'\t' '!seen[$1]++' > "$winners"
 
           placed=0
-          while IFS=$'\t' read -r pkg ver path; do
+          while IFS=$'\t' read -r pkg ver size path; do
             [ -z "$pkg" ] && continue
+            if [ "$size" -gt "$MAX_BYTES" ]; then
+              fname=$(basename "$path")
+              src_tag=$(awk -F'\t' -v f="$fname" '$1==f {print $2; exit}' /tmp/deb-tags.tsv)
+              if [ -z "$src_tag" ]; then
+                echo ">>> WARN: no source tag found for $fname — skipping from pool"
+                continue
+              fi
+              url="https://github.com/${SRC}/releases/download/${src_tag}/${fname}"
+              mb=$(( size / 1024 / 1024 ))
+              echo ">>> LARGE (${mb} MB): $pkg — will reference $url"
+              printf '%s\t%s\n' "$pkg" "$url" >> /tmp/large-external.tsv
+              skipped_large=$((skipped_large + 1))
+              continue
+            fi
+
             first_letter=$(printf '%s' "$pkg" | cut -c1 | tr 'A-Z' 'a-z')
             dest_dir="${pooldir}/${first_letter}/${pkg}"
             mkdir -p "$dest_dir"
@@ -248,9 +260,12 @@ jobs:
             placed=$((placed + 1))
           done < "$winners"
 
-          echo ">>> placed ${placed} unique package(s)"
+          echo ">>> placed ${placed} in pool, ${skipped_large} large (external URL)"
           echo ">>> pool size: $(find "$pooldir" -type f -name '*.deb' | wc -l)"
         done
+
+        echo ""
+        echo ">>> total large (external): $(wc -l < /tmp/large-external.tsv)"
 
     - name: Generate Packages indexes
       run: |
@@ -273,10 +288,45 @@ jobs:
             > "dists/${dist}/${comp}/binary-aarch64/Packages"
           dpkg-scanpackages --multiversion --arch all "pool/${comp}" /tmp/override.empty \
             > "dists/${dist}/${comp}/binary-all/Packages"
-
-          echo "    aarch64:    $(grep -c '^Package:' "dists/${dist}/${comp}/binary-aarch64/Packages" || true)"
-          echo "    binary-all: $(grep -c '^Package:' "dists/${dist}/${comp}/binary-all/Packages" || true)"
           cd - >/dev/null
+
+          python3 - "$outdir" "$dist" "$comp" <<'PYEOF'
+          import pathlib, sys
+          outdir, dist, comp = sys.argv[1], sys.argv[2], sys.argv[3]
+          large = {}
+          try:
+              for line in open("/tmp/large-external.tsv"):
+                  parts = line.rstrip("\n").split("\t")
+                  if len(parts) == 2:
+                      large[parts[0]] = parts[1]
+          except FileNotFoundError:
+              pass
+          if not large:
+              sys.exit(0)
+          for arch in ("aarch64", "all"):
+              p = pathlib.Path(f"{outdir}/dists/{dist}/{comp}/binary-{arch}/Packages")
+              if not p.exists(): continue
+              lines = p.read_text().split("\n")
+              out = []
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  out.append(line)
+                  if line.startswith("Package: "):
+                      pkg = line[len("Package: "):]
+                      j = i + 1
+                      while j < len(lines) and not lines[j].startswith("Package: "):
+                          if lines[j].startswith("Filename: ") and pkg in large:
+                              out.append("Filename: " + large[pkg])
+                              print(f"    rewrote {pkg}: -> {large[pkg]}")
+                          else:
+                              out.append(lines[j])
+                          j += 1
+                      i = j
+                      continue
+                  i += 1
+              p.write_text("\n".join(out))
+          PYEOF
         done
 
     - name: Compress Packages indexes
@@ -299,12 +349,7 @@ jobs:
         set -euo pipefail
         declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
         declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
-        declare -A LABEL=(
-          [main]="xodiosx Termux main"
-          [x11]="xodiosx Termux x11"
-          [root]="xodiosx Termux root"
-          [glibc]="xodiosx Termux glibc"
-        )
+        declare -A LABEL=( [main]="xodiosx Termux main" [x11]="xodiosx Termux x11" [root]="xodiosx Termux root" [glibc]="xodiosx Termux glibc" )
         for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
           dist="${DIST[$repo]}"; comp="${COMP[$repo]}"; label="${LABEL[$repo]}"
           conf="/tmp/apt-ftparchive-${repo}.conf"
@@ -321,56 +366,56 @@ jobs:
           apt-ftparchive -c "$conf" release "dists/${dist}" > "dists/${dist}/Release"
           cp "dists/${dist}/Release" "dists/${dist}/InRelease"
           cd - >/dev/null
-          echo ">>> termux-${repo}: dists/${dist}/Release written"
         done
 
-    - name: Verify repo layout
+    - name: Verify repo layout + size warnings
       run: |
         set -euo pipefail
         fail=0
         for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
           pkg_file=$(find "docs/termux-${repo}/dists" -type f -name 'Packages' | head -1)
-          if [ -z "$pkg_file" ]; then
-            echo "::error::No Packages file for $repo"; fail=$((fail+1)); continue
-          fi
+          if [ -z "$pkg_file" ]; then echo "::error::No Packages for $repo"; fail=$((fail+1)); continue; fi
+
           bad=0
           while IFS= read -r line; do
             case "$line" in
-              Filename:\ pool/*) : ;;
+              Filename:\ pool/*|Filename:\ https://*) : ;;
               Filename:\ *) echo "  BAD: $line"; bad=$((bad+1)) ;;
             esac
           done < <(grep '^Filename:' "$pkg_file" || true)
-          if [ "$bad" -gt 0 ]; then
-            echo "::error::${bad} bad Filename entries in $repo"; fail=$((fail+1))
-          fi
+          if [ "$bad" -gt 0 ]; then echo "::error::$bad bad Filename entries in $repo"; fail=$((fail+1)); fi
+
           rel_file=$(find "docs/termux-${repo}/dists" -type f -name 'Release' | head -1)
-          if [ -z "$rel_file" ]; then
-            echo "::error::No Release file for $repo"; fail=$((fail+1))
-          elif grep -q 'Packages\.xz' "$rel_file"; then
-            echo "::error::$repo Release references Packages.xz"; fail=$((fail+1))
-          fi
+          if [ -z "$rel_file" ]; then echo "::error::No Release for $repo"; fail=$((fail+1)); fi
+
           ndeb=$(find "docs/termux-${repo}/pool" -type f -name '*.deb' | wc -l)
-          echo "  $repo: $ndeb .deb, index=$pkg_file"
+          echo "  $repo: $ndeb .deb in pool"
         done
         [ "$fail" -gt 0 ] && exit 1
-        echo ">>> All checks passed"
 
-    # ==================================================================
-    # Commit & push — CHUNKED to avoid GitHub's RPC push limits.
-    #
-    # A single push of thousands of .deb files triggers HTTP 500.
-    # Strategy:
-    #   1. Raise git's HTTP buffer to 500 MB.
-    #   2. Stage all changes, snapshot the file list, unstage.
-    #   3. Commit + push in batches of <push_batch_size> files.
-    #   4. Retry each push up to 5 times with exponential backoff.
-    # ==================================================================
+        echo ""
+        echo ">>> docs/ total size:"
+        du -sh docs/ 2>/dev/null || true
+        total_mb=$(du -sm docs/ 2>/dev/null | awk '{print $1}')
+        if [ "${total_mb:-0}" -gt 900 ]; then
+          echo "::warning::docs/ is ${total_mb} MB — GitHub Pages has a ~1 GB soft limit."
+        fi
+
+        echo ""
+        echo ">>> Files referenced externally (size > max):"
+        if [ -s /tmp/large-external.tsv ]; then
+          while IFS=$'\t' read -r pkg url; do
+            echo "  $pkg -> $url"
+          done < /tmp/large-external.tsv
+        else
+          echo "  (none)"
+        fi
+
     - name: Commit & push docs (chunked)
       env:
         BATCH_SIZE: ${{ inputs.push_batch_size }}
       run: |
         set -uo pipefail
-
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git config http.postBuffer 524288000
@@ -378,110 +423,92 @@ jobs:
         git config http.lowSpeedTime 999999
         git config core.compression 9
 
-        # Stage everything once so deletions/modifications/renames are included
         git add -A docs/ .gitattributes
-
-        # Snapshot the list of changed paths (staged)
         git diff --cached --name-only > /tmp/changed-files.txt || true
         total=$(wc -l < /tmp/changed-files.txt)
         echo ">>> total changed files: $total"
-
         if [ "$total" -eq 0 ]; then
-          echo ">>> no changes — nothing to push"
-          exit 0
+          echo ">>> no changes — nothing to push"; exit 0
         fi
-
-        # Unstage so we can re-stage in batches
         git reset -q
 
         BATCH="${BATCH_SIZE:-150}"
-        case "$BATCH" in
-          ''|*[!0-9]*) BATCH=150 ;;
-        esac
+        case "$BATCH" in ''|*[!0-9]*) BATCH=150 ;; esac
         [ "$BATCH" -lt 20 ] && BATCH=20
 
         batches=$(( (total + BATCH - 1) / BATCH ))
-        echo ">>> pushing in $batches batch(es) of up to $BATCH files each"
+        echo ">>> pushing in $batches batch(es) of $BATCH"
 
         push_with_retry() {
           local attempt
           for attempt in 1 2 3 4 5; do
             echo "    push attempt $attempt/5 ..."
             if git push origin HEAD 2>/tmp/push_err.log; then
-              echo "    push ok"
-              return 0
+              echo "    push ok"; return 0
             fi
-            echo "    push failed. tail of error:"
+            echo "    push failed:"
             tail -5 /tmp/push_err.log | sed 's/^/        /' || true
-            local backoff=$((attempt * 15))
-            echo "    sleeping ${backoff}s before retry"
-            sleep "$backoff"
+            if grep -q 'GH001\|exceeds GitHub.s file size limit\|pre-receive hook declined' /tmp/push_err.log; then
+              echo "::error::GitHub rejected the push for a hard reason (file too large, etc.)"
+              return 1
+            fi
+            sleep $((attempt * 15))
           done
           return 1
         }
 
-        i=0
-        batch_num=0
+        i=0; batch_num=0
         while [ "$i" -lt "$total" ]; do
           batch_num=$(( batch_num + 1 ))
-          end=$(( i + BATCH ))
-          [ "$end" -gt "$total" ] && end=$total
-
-          echo "=================================================="
-          echo ">>> batch $batch_num/$batches  (files $((i+1))..$end of $total)"
-          echo "=================================================="
-
-          # Stage this batch
+          end=$(( i + BATCH )); [ "$end" -gt "$total" ] && end=$total
+          echo ">>> batch $batch_num/$batches (files $((i+1))..$end)"
           sed -n "$((i+1)),${end}p" /tmp/changed-files.txt > /tmp/batch-list.txt
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             git add -- "$f" 2>/dev/null || true
           done < /tmp/batch-list.txt
 
-          # If nothing staged (e.g. all deletes already committed), skip
           if git diff --cached --quiet; then
-            echo "    nothing staged in this batch — skipping"
-            i=$end
-            continue
+            echo "    nothing staged — skipping"; i=$end; continue
           fi
 
           git commit -q -m "Update APT repository (batch $batch_num/$batches) [skip ci]" \
             -m "Source: ${{ inputs.source_repo }}" || {
-              echo "::error::commit failed for batch $batch_num"
-              exit 1
+              echo "::error::commit failed for batch $batch_num"; exit 1
             }
-
           if ! push_with_retry; then
-            echo "::error::push failed for batch $batch_num after 5 attempts"
+            echo "::error::push failed for batch $batch_num"
             exit 1
           fi
-
           i=$end
         done
-
-        echo ""
-        echo "=================================================="
-        echo ">>> all $batches batch(es) pushed successfully"
-        echo "=================================================="
+        echo ">>> all batches pushed"
 
     - name: Summary
       run: |
         {
           echo "## APT Repositories Generated"
           echo ""
-          echo "Source of .deb releases: \`${{ inputs.source_repo }}\`"
-          echo ""
+          echo "Source: \`${{ inputs.source_repo }}\`"
           echo "Base URL: \`https://xodiosx.github.io/Termux-pkg-x/\`"
           echo ""
+          echo "### Sources"
+          echo '```'
           for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
             case "$repo" in
-              main)  dist=stable; comp=main ;;
-              x11)   dist=x11;    comp=main ;;
-              root)  dist=root;   comp=stable ;;
-              glibc) dist=glibc;  comp=main ;;
+              main)  d=stable; c=main ;;
+              x11)   d=x11;    c=main ;;
+              root)  d=root;   c=stable ;;
+              glibc) d=glibc;  c=main ;;
             esac
-            echo "\`\`\`"
-            echo "deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x/termux-${repo} ${dist} ${comp}"
-            echo "\`\`\`"
+            echo "deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x/termux-${repo} ${d} ${c}"
           done
+          echo '```'
+          if [ -s /tmp/large-external.tsv ]; then
+            echo ""
+            echo "### Packages referenced by URL (too large for Pages)"
+            echo '```'
+            cat /tmp/large-external.tsv
+            echo '```'
+          fi
         } >> $GITHUB_STEP_SUMMARY
