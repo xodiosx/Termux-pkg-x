@@ -1,4 +1,4 @@
-lname: Generate APT Repository from Releases
+name: Generate APT Repository from Releases
 
 on:
   workflow_dispatch:
