@@ -7,6 +7,10 @@ on:
         description: "GitHub repo that hosts the release tags (owner/name)"
         required: true
         default: "xodiosx/termux-packages"
+      hf_repo_id:
+        description: "Hugging Face dataset repo where .deb files live (username/repo-name)"
+        required: true
+        default: "xodiosx/xodos-packages"
       tags:
         description: "Space/comma separated tags. Leave empty to auto-discover."
         required: false
@@ -24,7 +28,7 @@ on:
         required: false
         default: "150"
       max_deb_mb:
-        description: "Skip .deb files larger than this. 0 = reference ALL .deb by URL (recommended)"
+        description: "Skip .deb files larger than this. 0 = reference ALL .deb by URL (recommended for HF hosting)"
         required: false
         default: "0"
 
@@ -82,6 +86,9 @@ jobs:
         fi
         cat .gitattributes
 
+    # ==================================================================
+    # 1. Resolve tags
+    # ==================================================================
     - name: Resolve tags
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,21 +110,22 @@ jobs:
         else
           echo ">>> Auto-discovering tags in $SRC for repos: $INPUT_REPOS"
           REPOS_ALT=$(echo "$INPUT_REPOS" | tr ',' '|')
-          mapfile -t TAGS < <(
-            gh release list --repo "$SRC" --limit 1000 \
-              --json tagName,createdAt \
-              --jq "sort_by(.createdAt) | .[].tagName | select(test(\"^xodos-XoDos-(${REPOS_ALT})-p[0-9]+-\"))"
-          )
-          if [ "${#TAGS[@]}" -eq 0 ]; then
+          gh release list --repo "$SRC" --limit 1000 \
+            --json tagName,createdAt \
+            --jq "sort_by(.createdAt) | .[].tagName | select(test(\"^xodos-XoDos-(${REPOS_ALT})-p[0-9]+-\"))" \
+            > /tmp/plan/tags.txt
+          if [ ! -s /tmp/plan/tags.txt ]; then
             echo "::error::No matching tags found in $SRC."
             gh release list --repo "$SRC" --limit 30 || true
             exit 1
           fi
-          printf '%s\n' "${TAGS[@]}" > /tmp/plan/tags.txt
-          echo ">>> Auto-discovered ${#TAGS[@]} tag(s):"
-          printf '    %s\n' "${TAGS[@]}"
+          echo ">>> Auto-discovered $(wc -l < /tmp/plan/tags.txt) tag(s):"
+          sed 's/^/    /' /tmp/plan/tags.txt
         fi
 
+    # ==================================================================
+    # 2. Parse + group tags
+    # ==================================================================
     - name: Parse and group tags by repo
       run: |
         set -euo pipefail
@@ -140,10 +148,13 @@ jobs:
 
         echo ">>> Full mapping:"
         sort /tmp/plan/groups.txt | sed 's/^/    /'
-        echo ">>> Repos present:"
         cut -f1 /tmp/plan/groups.txt | sort -u > /tmp/plan/repos.txt
+        echo ">>> Repos present:"
         sed 's/^/    /' /tmp/plan/repos.txt
 
+    # ==================================================================
+    # 3. Download all .deb from all parts of all repos
+    # ==================================================================
     - name: Download .deb files from all parts
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -169,7 +180,7 @@ jobs:
                    --pattern "*.deb" --dir "$tmpdir" 2>/tmp/dl_err.log
             then
               echo ">>> WARN: download failed for $tag"
-              head -5 /tmp/dl_err.log || true
+              head -5 /tmp/dl_err.log | sed 's/^/    /' || true
               rm -rf "$tmpdir"
               continue
             fi
@@ -187,15 +198,20 @@ jobs:
           echo ">>> repo $repo: $total .deb file(s)"
         done < /tmp/plan/repos.txt
 
+    # ==================================================================
+    # 4. Build pool — with max_deb_mb=0 (default), every .deb is
+    #    referenced by Hugging Face URL and NOTHING lands in pool/.
+    # ==================================================================
     - name: Build per-repo pool
       env:
         MAX_DEB_MB: ${{ inputs.max_deb_mb }}
-        SRC: ${{ inputs.source_repo }}
+        HF_REPO: ${{ inputs.hf_repo_id }}
       run: |
         set -euo pipefail
 
         MAX_BYTES=$(( ${MAX_DEB_MB:-0} * 1024 * 1024 ))
         echo ">>> max_deb_mb=${MAX_DEB_MB}  ($MAX_BYTES bytes)"
+        echo ">>> HF repo for external .deb URLs: $HF_REPO"
 
         : > /tmp/large-external.tsv
 
@@ -250,16 +266,16 @@ jobs:
           skipped_large=0
           while IFS=$'\t' read -r pkg ver size path; do
             [ -z "$pkg" ] && continue
-            if [ "$size" -gt "$MAX_BYTES" ]; then
+
+            # If max_deb_mb=0, all files are external
+            # Else, only files > MAX_BYTES are external
+            if [ "$MAX_BYTES" -eq 0 ] || [ "$size" -gt "$MAX_BYTES" ]; then
               fname=$(basename "$path")
-              src_tag=$(awk -F'\t' -v f="$fname" '$1==f {print $2; exit}' /tmp/deb-tags.tsv)
-              if [ -z "$src_tag" ]; then
-                echo ">>> WARN: no source tag for $fname — skipping"
-                continue
+              url="https://huggingface.co/datasets/${HF_REPO}/resolve/main/${fname}"
+              if [ "$MAX_BYTES" -gt 0 ]; then
+                mb=$(( size / 1024 / 1024 ))
+                echo ">>> LARGE (${mb} MB): $pkg -> $url"
               fi
-              url="https://github.com/${SRC}/releases/download/${src_tag}/${fname}"
-              mb=$(( size / 1024 / 1024 ))
-              echo ">>> LARGE (${mb} MB): $pkg -> $url"
               printf '%s\t%s\n' "$pkg" "$url" >> /tmp/large-external.tsv
               skipped_large=$((skipped_large + 1))
               continue
@@ -273,13 +289,27 @@ jobs:
             placed=$((placed + 1))
           done < "$winners"
 
-          echo ">>> placed ${placed} in pool, ${skipped_large} external"
+          echo ">>> placed ${placed} in pool, ${skipped_large} external (HF)"
         done < /tmp/plan/repos.txt
 
         echo ""
-        echo ">>> total external: $(wc -l < /tmp/large-external.tsv)"
+        echo ">>> total external (HF): $(wc -l < /tmp/large-external.tsv)"
 
+    # ==================================================================
+    # 5. Generate Packages indexes with HF URLs in Filename:
+    #
+    # We do it differently from before: run dpkg-scanpackages on an
+    # empty pool (or the real one if max_deb_mb>0), then inject the
+    # external entries ourselves. This avoids relying on the pool
+    # containing the .deb files at all.
+    #
+    # Simpler approach: we still call dpkg-scanpackages on whatever
+    # landed in pool/, then rewrite Filename for external ones via awk.
+    # ==================================================================
     - name: Generate Packages indexes
+      env:
+        HF_REPO: ${{ inputs.hf_repo_id }}
+        MAX_DEB_MB: ${{ inputs.max_deb_mb }}
       run: |
         set -euo pipefail
         : > /tmp/override.empty
@@ -307,24 +337,111 @@ jobs:
             > "dists/${dist}/${comp}/binary-all/Packages"
           cd - >/dev/null
 
-          if [ -s /tmp/large-external.tsv ]; then
+          # If max_deb_mb=0 the pool is empty, so we need to build the
+          # Packages file entirely from the external URL list. Otherwise
+          # we only rewrite the entries that are external.
+          if [ "$MAX_DEB_MB" = "0" ] && [ -s /tmp/large-external.tsv ]; then
+            echo ">>> max_deb_mb=0 — building Packages from HF URL list"
+            # Build full Packages entries from scratch using dpkg-deb
+            # on the raw .deb files, then substitute Filename with HF URL.
             for arch in aarch64 all; do
-              f="${outdir}/dists/${dist}/${comp}/binary-${arch}/Packages"
-              if [ ! -f "$f" ]; then continue; fi
-              awk -F'\t' '
-                NR==FNR { url[$1]=$2; next }
-                /^Package: / { pkg=substr($0,10); print; next }
-                /^Filename: / && (pkg in url) { print "Filename: " url[pkg]; next }
-                { print }
-              ' /tmp/large-external.tsv "$f" > "${f}.new"
-              mv "${f}.new" "$f"
+              out_pkgs="${outdir}/dists/${dist}/${comp}/binary-${arch}/Packages"
+              : > "$out_pkgs"
+              while IFS=$'\t' read -r pkg url; do
+                # Find the raw .deb for this pkg + arch
+                match=""
+                for d in /tmp/raw-debs/"$repo"/*.deb; do
+                  [ -f "$d" ] || continue
+                  p=$(dpkg-deb -f "$d" Package 2>/dev/null || echo "")
+                  a=$(dpkg-deb -f "$d" Architecture 2>/dev/null || echo "")
+                  if [ "$p" = "$pkg" ]; then
+                    if [ "$arch" = "all" ] && [ "$a" = "all" ]; then match="$d"; break; fi
+                    if [ "$arch" = "aarch64" ] && { [ "$a" = "aarch64" ] || [ "$a" = "all" ]; }; then match="$d"; break; fi
+                  fi
+                done
+                [ -z "$match" ] && continue
+
+                # Emit Package fields, then override Filename
+                dpkg-deb -f "$match" \
+                  | awk -v url="$url" '
+                      /^Package:/       { print; next }
+                      /^Version:/       { print; next }
+                      /^Architecture:/  { print; next }
+                      /^Maintainer:/    { print; next }
+                      /^Installed-Size:/ { print; next }
+                      /^Depends:/       { print; next }
+                      /^Recommends:/    { print; next }
+                      /^Suggests:/      { print; next }
+                      /^Conflicts:/     { print; next }
+                      /^Replaces:/      { print; next }
+                      /^Provides:/      { print; next }
+                      /^Breaks:/        { print; next }
+                      /^Section:/       { print; next }
+                      /^Priority:/      { print; next }
+                      /^Homepage:/      { print; next }
+                      /^Description:/   { print; next }
+                      /^Essential:/     { print; next }
+                      /^Multi-Arch:/    { print; next }
+                    ' >> "$out_pkgs"
+
+                # Append Filename + Size + checksums from the raw .deb
+                fsize=$(stat -c %s "$match")
+                md5=$(md5sum "$match" | awk '{print $1}')
+                sha1=$(sha1sum "$match" | awk '{print $1}')
+                sha256=$(sha256sum "$match" | awk '{print $1}')
+                {
+                  echo "Filename: $url"
+                  echo "Size: $fsize"
+                  echo "MD5sum: $md5"
+                  echo "SHA1: $sha1"
+                  echo "SHA256: $sha256"
+                  echo ""
+                } >> "$out_pkgs"
+              done < /tmp/large-external.tsv
+
+              # Deduplicate by package name (keep highest version)
+              # Group entries, sort, keep first per Package
+              python3 - "$out_pkgs" << 'PYEOF'
+import sys, re
+p = sys.argv[1]
+text = open(p).read()
+blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+seen = {}
+for b in blocks:
+    m = re.search(r'^Package:\s*(\S+)', b, re.M)
+    if not m: continue
+    pkg = m.group(1)
+    if pkg not in seen:
+        seen[pkg] = b
+open(p, "w").write("\n\n".join(seen.values()) + "\n")
+PYEOF
+
+              echo "    binary-${arch}: $(grep -c '^Package:' "$out_pkgs" || true) entries"
             done
+          else
+            # Only rewrite Filename for external packages
+            if [ -s /tmp/large-external.tsv ]; then
+              for arch in aarch64 all; do
+                f="${outdir}/dists/${dist}/${comp}/binary-${arch}/Packages"
+                if [ ! -f "$f" ]; then continue; fi
+                awk -F'\t' '
+                  NR==FNR { url[$1]=$2; next }
+                  /^Package: / { pkg=substr($0,10); print; next }
+                  /^Filename: / && (pkg in url) { print "Filename: " url[pkg]; next }
+                  { print }
+                ' /tmp/large-external.tsv "$f" > "${f}.new"
+                mv "${f}.new" "$f"
+              done
+            fi
           fi
 
           echo "    aarch64:    $(grep -c '^Package:' "${outdir}/dists/${dist}/${comp}/binary-aarch64/Packages" || true)"
           echo "    binary-all: $(grep -c '^Package:' "${outdir}/dists/${dist}/${comp}/binary-all/Packages" || true)"
         done < /tmp/plan/repos.txt
 
+    # ==================================================================
+    # 6. Compress with gzip only
+    # ==================================================================
     - name: Compress Packages indexes
       run: |
         set -euo pipefail
@@ -345,6 +462,9 @@ jobs:
           done
         done < /tmp/plan/repos.txt
 
+    # ==================================================================
+    # 7. Release files (no heredoc)
+    # ==================================================================
     - name: Generate Release files
       run: |
         set -euo pipefail
@@ -376,7 +496,10 @@ jobs:
           echo ">>> xodos-${repo}: Release written"
         done < /tmp/plan/repos.txt
 
-    - name: Verify repo layout + size warnings
+    # ==================================================================
+    # 8. Sanity check
+    # ==================================================================
+    - name: Verify repo layout
       run: |
         set -euo pipefail
         fail=0
@@ -388,25 +511,32 @@ jobs:
             fail=$((fail+1))
             continue
           fi
+
+          good=0
           bad=0
           while IFS= read -r line; do
             case "$line" in
-              Filename:\ pool/*|Filename:\ https://*) : ;;
-              Filename:\ *) echo "  BAD: $line"; bad=$((bad+1)) ;;
+              Filename:\ https://*) good=$((good+1)) ;;
+              Filename:\ pool/*)    good=$((good+1)) ;;
+              Filename:\ *)         echo "  BAD: $line"; bad=$((bad+1)) ;;
             esac
           done < <(grep '^Filename:' "$pkg_file" || true)
+
           if [ "$bad" -gt 0 ]; then
             echo "::error::$bad bad Filename entries in $repo"
             fail=$((fail+1))
           fi
+
           rel_file=$(find "docs/xodos-${repo}/dists" -type f -name 'Release' | head -1)
           if [ -z "$rel_file" ]; then
             echo "::error::No Release for $repo"
             fail=$((fail+1))
           fi
+
           ndeb=$(find "docs/xodos-${repo}/pool" -type f -name '*.deb' 2>/dev/null | wc -l)
-          echo "  xodos-${repo}: $ndeb .deb in pool, index=$pkg_file"
+          echo "  xodos-${repo}: $good Filename entries ($ndeb .deb in pool)"
         done < /tmp/plan/repos.txt
+
         if [ "$fail" -gt 0 ]; then
           exit 1
         fi
@@ -415,13 +545,11 @@ jobs:
         echo ">>> docs/ total size:"
         du -sh docs/ 2>/dev/null || true
         echo ""
-        echo ">>> externally-referenced .deb files:"
-        if [ -s /tmp/large-external.tsv ]; then
-          wc -l < /tmp/large-external.tsv
-        else
-          echo "  (none)"
-        fi
+        echo ">>> externally-referenced .deb files: $(wc -l < /tmp/large-external.tsv)"
 
+    # ==================================================================
+    # 9. Commit + push in chunks
+    # ==================================================================
     - name: Commit & push docs (chunked)
       env:
         BATCH_SIZE: ${{ inputs.push_batch_size }}
@@ -490,7 +618,7 @@ jobs:
           fi
 
           git commit -q -m "Update APT repository (batch $batch_num/$batches) [skip ci]" \
-            -m "Source: ${{ inputs.source_repo }}" || {
+            -m "Source: ${{ inputs.source_repo }}  HF: ${{ inputs.hf_repo_id }}" || {
               echo "::error::commit failed for batch $batch_num"
               exit 1
             }
@@ -507,11 +635,13 @@ jobs:
         {
           echo "## APT Repositories Generated"
           echo ""
-          echo "Source: ${{ inputs.source_repo }}"
+          echo "Source repo: \`${{ inputs.source_repo }}\`"
+          echo "HF dataset: \`${{ inputs.hf_repo_id }}\`"
           echo ""
-          echo "Base URL: https://xodiosx.github.io/Termux-pkg-x/"
+          echo "Base URL for metadata: \`https://xodiosx.github.io/Termux-pkg-x/\`"
+          echo "Base URL for .deb:      \`https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/\`"
           echo ""
-          echo "### sources.list entries"
+          echo "### sources.list"
           echo '```'
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
