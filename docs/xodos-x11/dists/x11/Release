@@ -1,0 +1,32 @@
+Architectures: aarch64 all
+Codename: x11
+Components: main
+Date: Tue, 13 Oct 2026 19:23:04 +0000
+Description: xodos custom Termux x11 packages
+Label: xodos Termux x11
+Origin: xodos
+Suite: x11
+MD5Sum:
+ d1a9f75afbd1ba463f29ea4b2f0d093b              191 Release
+ 3cb315397d1a1474ee005dd5f373027f           652362 main/binary-aarch64/Packages
+ be8512712a8d995f3b4617612fc3b44f           201014 main/binary-aarch64/Packages.gz
+ 15e13688097e1d0bc83573ecdfcb63ed            50558 main/binary-all/Packages
+ e8baae140492fdc71740ff64aac7932f            16212 main/binary-all/Packages.gz
+SHA1:
+ 67d9f2fdedc299629c87376c017a601e9cf377de              191 Release
+ ad20ce77e53a22792838cbdb720079b3b7f7788d           652362 main/binary-aarch64/Packages
+ ed68e7f8827fc66f71536be928e33dbde029c088           201014 main/binary-aarch64/Packages.gz
+ ad0e37a901b81b7821d0d82eec6ed957b7a0c5db            50558 main/binary-all/Packages
+ 73d7cbab7bea34be31dcf321c1041e4fce307417            16212 main/binary-all/Packages.gz
+SHA256:
+ 1f4068729dd83b630190432f516c99985c44af70d7a71b9b0dfaceeeefd5bfaf              191 Release
+ a3b366ada47596b9e4b7965c67a3e60af591f240aa70103e85b72c6805e44b95           652362 main/binary-aarch64/Packages
+ d48fb90eee8a7219850fffa5cafe745bd781781d23e948d3b66d287b117bf098           201014 main/binary-aarch64/Packages.gz
+ 9d186ac14a0de8a779dd4ac5385c901ab85c19da3fe8f4bbd824d3310ef6fb4e            50558 main/binary-all/Packages
+ 9b747a835c82bcf60a00e52b91aa5a6c8ede90a27fde087bc610e643f336d2e7            16212 main/binary-all/Packages.gz
+SHA512:
+ 1bb131c60903db6199471f664d1bc93300c5faee47d1d9a8d4cc65bef4d69a5bb08318dbd8ec4cbdebec8e05ca624c0b835227b85c153295b7e2b48f7d5a5a46              191 Release
+ 811b9bfef20015e42b1fcdc42e99c560f755a1c39ef4d93fea952cece54fab96d8a861f811efa591a4b9aa2d1181a830214c4102a8a8cd2dd8207b5ab7c4956b           652362 main/binary-aarch64/Packages
+ 34784dbdead93e8f73659c59bdd76106e66b319c5e7c4374967131a71cce83369fe54f038aea72f5a668d4551c7f28a5a5a73d7d8786db7150da2cc9c5cf547f           201014 main/binary-aarch64/Packages.gz
+ e1b0bbf55a84c582830c6a52cdd4fc63ce37eff329de0881eb972c833b854212f7e7a631ac1e21fa0974c1d4943c09a550d416e713e943b5cb22bb15f777b808            50558 main/binary-all/Packages
+ 68edefe44996d79ef16f421b7227f370c31d5937ac89481556a21efae857c3c09dba9c0b21bf16724f9f9317d109c775a1681ecf8d174fa1a3b071f6e3b5776a            16212 main/binary-all/Packages.gz
