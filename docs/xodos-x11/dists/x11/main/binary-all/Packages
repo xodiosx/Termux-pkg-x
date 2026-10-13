@@ -870,6 +870,20 @@ SHA256: 443803f4f7ae72aa823a609edff3e3ebbcc5833da43fc808d9d9feff0c4704b6
 Homepage: https://github.com/linuxmint/mint-x-icons
 Description: The Mint-X icon theme for cinnamon
 
+Package: mint-y-icon-theme
+Version: 1.9.7
+Architecture: all
+Maintainer: @termux
+Installed-Size: 132000
+Depends: hicolor-icon-theme, adwaita-icon-theme, adwaita-icon-theme-legacy, mint-x-icon-theme, gtk-update-icon-cache
+Filename: pool/main/m/mint-y-icon-theme/mint-y-icon-theme_1.9.7_all.deb
+Size: 71630852
+MD5sum: c3e444a7e4821dd78a49bd110def1d0e
+SHA1: 83a2b96f6788a7494ba5a0c02e716000d0dba377
+SHA256: 0c5706ef4ce7c8d76e246470f123ed9215c785e7c25f87e853954872fedb491e
+Homepage: https://github.com/linuxmint/mint-y-icons
+Description: The Mint-Y icon theme for cinnamon
+
 Package: mogan-data
 Version: 1.2.9.8-5
 Architecture: all

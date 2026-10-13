@@ -1423,6 +1423,22 @@ SHA256: 34471b082b0e30925a1b5d8c45e7a38c6c3667f36d3b485a4e67369a8a3e3896
 Homepage: https://www.darktable.org/
 Description: Virtual lighttable and darkroom for photographers
 
+Package: dbeaver
+Version: 26.2.2
+Architecture: aarch64
+Maintainer: Gouranga Das Samrat <gouranga.das.khulna@gmail.com>
+Installed-Size: 102592
+Depends: at-spi2-core, gtk3, libcairo, libx11, libxtst, openjdk-25
+Recommends: openjdk-25-x
+Suggests: termux-x11-nightly
+Filename: pool/main/d/dbeaver/dbeaver_26.2.2_aarch64.deb
+Size: 87776138
+MD5sum: f1be2e7be35ee799c7c6ccbe521d766b
+SHA1: 51aac47c4bb4b9d88d82d6d47cbc4fa38ec1b281
+SHA256: 32056f63a027563473472aff052ce00b81337c3b8e2f11a0ad2ff999fc3b2158
+Homepage: https://dbeaver.io/
+Description: Free universal database tool and SQL client (Community Edition)
+
 Package: dbus-glib
 Version: 0.116
 Architecture: aarch64
@@ -1718,6 +1734,20 @@ SHA256: 7a46d756170bd40382c4599f3a4893042e5157ea899e4aadb7b80eb5118876e3
 Homepage: https://www.mesa3d.org
 Description: eglinfo program for system EGL library
 
+Package: electron-for-code-oss
+Version: 42.7.0
+Architecture: aarch64
+Maintainer: @licy183
+Installed-Size: 404252
+Depends: atk, cups, dbus, fontconfig, gtk3, krb5, libc++, libevdev, libxkbcommon, libminizip, libnss, libx11, mesa, openssl, pango, pulseaudio, zlib
+Filename: pool/main/e/electron-for-code-oss/electron-for-code-oss_42.7.0_aarch64.deb
+Size: 84686244
+MD5sum: 00b69f7b7a25d77a0f601b9e579ad7cd
+SHA1: 9af2d3bb323895024a92d64b4864681279089d0f
+SHA256: e49540b96ed89dea67d8bb51d9cb1aa248a338f0898ccad96ffd5169b1660301
+Homepage: https://github.com/electron/electron
+Description: Build cross-platform desktop apps with JavaScript, HTML, and CSS
+
 Package: electron-headers-for-code-oss
 Version: 42.7.1
 Architecture: aarch64
@@ -1744,6 +1774,20 @@ SHA1: f6241362ac2cf54737267ef59b7619683b1bf390
 SHA256: 2104cff2aba5df28b00679baf717d691d7ffb50f0a18820de7ec76dfc7885d81
 Homepage: https://github.com/electron/electron
 Description: Build cross-platform desktop apps with JavaScript, HTML, and CSS (Used by Code-OSS, Host Tools)
+
+Package: electron42
+Version: 42.7.1
+Architecture: aarch64
+Maintainer: @licy183
+Installed-Size: 404596
+Depends: atk, cups, dbus, fontconfig, gtk3, krb5, libc++, libevdev, libxkbcommon, libminizip, libnss, libx11, mesa, openssl, pango, pulseaudio, zlib
+Filename: pool/main/e/electron42/electron42_42.7.1_aarch64.deb
+Size: 84801944
+MD5sum: 209d88d48b5f497df5aac91f072dbabd
+SHA1: ba7d57ab6983fb38e69d594d4e42e55d5653239c
+SHA256: 43bf3ad7cf23bf2c6381e7c24f7c8135d9b1db7b2881b1abb490f8e15d416c5d
+Homepage: https://github.com/electron/electron
+Description: Build cross-platform desktop apps with JavaScript, HTML, and CSS (Version 42)
 
 Package: electron42-headers
 Version: 42.11.12
@@ -2364,6 +2408,20 @@ SHA1: e468269ba657c897b52b2d9ac4b6f8dafeacab25
 SHA256: 04201b0cb209f84e680211070138e87789bfb5ae6d03aa8cbfe12b66123d5f69
 Homepage: https://apps.kde.org/filelight/
 Description: View disk usage information
+
+Package: firefox
+Version: 157.0.1
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 281692
+Depends: ffmpeg, fontconfig, freetype, gdk-pixbuf, glib, gtk3, libandroid-shmem, libandroid-spawn, libc++, libcairo, libevent, libffi, libice, libicu, libjpeg-turbo, libnspr, libnss, libpixman, libsm, libvpx, libwebp, libx11, libxcb, libxcomposite, libxdamage, libxext, libxfixes, libxrandr, libxtst, pango, pulseaudio, zlib
+Filename: pool/main/f/firefox/firefox_157.0.1_aarch64.deb
+Size: 76676160
+MD5sum: aab87bf95d8654a9ddb635c18534fe40
+SHA1: 46085a26bc747f4318bd5822a734b61901452d16
+SHA256: 3c79438c487e398bb8bfdae833a109466c26e35ef885b50982bae52cafc2e09d
+Homepage: https://www.mozilla.org/firefox
+Description: Mozilla Firefox web browser
 
 Package: firefoxpwa
 Version: 2.20.1
@@ -3350,6 +3408,20 @@ SHA1: 4c319df03c82e785934a2b58fece23b6df9c8ac8
 SHA256: e49ed0870d266c9daa1e4b10c25b876c13ab5fbf6dadc0f45b39ed2120588e71
 Homepage: http://www.gnumeric.org/
 Description: Static libraries for gnumeric
+
+Package: godot
+Version: 4.7.2
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 152324
+Depends: brotli, ca-certificates, fontconfig, freetype, glu, libandroid-execinfo, libc++, libenet, libgraphite, libjpeg-turbo, libogg, libtheora, libvorbis, libvpx, libwebp, libwslay, libxcursor, libxi, libxinerama, libxkbcommon, libxrandr, mbedtls, miniupnpc, opengl, opusfile, pcre2, python, sdl3, speechd, zlib, zstd
+Filename: pool/main/g/godot/godot_4.7.2_aarch64.deb
+Size: 64151554
+MD5sum: 551cdddfd51ee242f2de9abe79f3c85a
+SHA1: 178b31cd83b4187eff066fcebf5bb5e5197a7ae4
+SHA256: fa62bd8a358adade903acc914c069a86dde454e75b8ea153c2f2fe38fa834206
+Homepage: https://godotengine.org
+Description: Advanced cross-platform 2D and 3D game engine
 
 Package: goffice
 Version: 0.10.62
@@ -6587,6 +6659,21 @@ SHA256: 38e50f0878569a6d8926bd7401a2267efcb062e025a1fbbf33f7900849898413
 Homepage: https://apps.kde.org/krfb/
 Description: Desktop Sharing
 
+Package: krita
+Version: 6.0.4.1-1
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 185844
+Depends: exiv2, ffmpeg, fftw, fontconfig, freetype, fribidi, giflib, gsl, harfbuzz, imath, kf6-kcolorscheme, kf6-kcompletion, kf6-kconfig, kf6-kcoreaddons, kf6-kguiaddons, kf6-ki18n, kf6-kitemviews, kf6-kwidgetsaddons, kf6-kcrash, libjpeg-turbo, libkdcraw, libpng, libtiff, libunibreak, libwebp, libx11, libxkbcommon, littlecms, mlt, opencolorio, openexr, openjpeg, qt6-qt5compat, qt6-qtbase, qt6-qtdeclarative, qt6-qtsvg, quazip, zlib
+Recommends: kf6-kimageformats, kseexpr, libheif, libjxl, libmypaint, poppler-qt
+Filename: pool/main/k/krita/krita_6.0.4.1-1_aarch64.deb
+Size: 76734442
+MD5sum: fd444d3f10ca316cd1d4ecf1e0673c84
+SHA1: 47d2a1b9c9fcf7ca66ead1b2205ec3b327d86fc5
+SHA256: aa0e233cd3a8a5f1f55044cd0ee269d071531f64013b66992703de140409880a
+Homepage: https://krita.org
+Description: Edit and paint images
+
 Package: kruler
 Version: 26.08.2
 Architecture: aarch64
@@ -8031,6 +8118,20 @@ SHA256: b79ffd9edd13472939506f624e245ac7c58dc80b529e48e8f1c663294dc26598
 Homepage: https://libresprite.github.io/
 Description: Free and open source program for creating and animating sprites
 
+Package: librewolf
+Version: 157.0.1-1-0
+Architecture: aarch64
+Maintainer: @3ls-it
+Installed-Size: 280856
+Depends: ffmpeg, fontconfig, freetype, gdk-pixbuf, glib, gtk3, libandroid-shmem, libandroid-spawn, libc++, libcairo, libevent, libffi, libice, libicu, libjpeg-turbo, libnspr, libnss, libpixman, libsm, libvpx, libwebp, libx11, libxcb, libxcomposite, libxdamage, libxext, libxfixes, libxrandr, libxtst, pango, pulseaudio, zlib
+Filename: pool/main/l/librewolf/librewolf_157.0.1-1-0_aarch64.deb
+Size: 76198810
+MD5sum: 25a7a603463d067b280f2311764c43e7
+SHA1: d8e0bdea9870b2b245a4ba706dac430b0115d079
+SHA256: 0f7e89828b08145eae0738bb656eafdb4c18004beebc47368ce33edc8e70a482
+Homepage: https://librewolf.net/
+Description: A custom version of Firefox, focused on privacy, security and freedom.
+
 Package: libsimdutf
 Version: 9.2.1
 Architecture: aarch64
@@ -9125,6 +9226,20 @@ SHA256: b5d1473b6ce647243f624cc708227a2826460f6f3ae255e0cd363436e9a55cb3
 Homepage: https://invent.kde.org/pim/mailimporter
 Description: Mail importer library
 
+Package: mame
+Version: 0.289
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 422680
+Depends: libexpat, zlib, zstd, libjpeg-turbo, libflac, lua55, libsqlite, portmidi, portaudio, pulseaudio, utf8proc, libpugixml, fontconfig, sdl2, sdl2-ttf, qt6-qtbase
+Filename: pool/main/m/mame/mame_0.289_aarch64.deb
+Size: 91064214
+MD5sum: f12b6093c281be3d20e7bf6e7ecb3c45
+SHA1: 58c4920a0c126fb4e69c873a4fab4ea787d552ba
+SHA256: 5e2688fc351d26903d447270934f60aceffe6da1d18ec49d6221c4c0cae7612b
+Homepage: https://mamedev.org/
+Description: Multi-purpose emulation framework
+
 Package: mame-tools
 Version: 0.289
 Architecture: aarch64
@@ -9852,6 +9967,20 @@ SHA1: 908f829da3b7c1a26591002664a49db3e21e087b
 SHA256: 443803f4f7ae72aa823a609edff3e3ebbcc5833da43fc808d9d9feff0c4704b6
 Homepage: https://github.com/linuxmint/mint-x-icons
 Description: The Mint-X icon theme for cinnamon
+
+Package: mint-y-icon-theme
+Version: 1.9.7
+Architecture: all
+Maintainer: @termux
+Installed-Size: 132000
+Depends: hicolor-icon-theme, adwaita-icon-theme, adwaita-icon-theme-legacy, mint-x-icon-theme, gtk-update-icon-cache
+Filename: pool/main/m/mint-y-icon-theme/mint-y-icon-theme_1.9.7_all.deb
+Size: 71630852
+MD5sum: c3e444a7e4821dd78a49bd110def1d0e
+SHA1: 83a2b96f6788a7494ba5a0c02e716000d0dba377
+SHA256: 0c5706ef4ce7c8d76e246470f123ed9215c785e7c25f87e853954872fedb491e
+Homepage: https://github.com/linuxmint/mint-y-icons
+Description: The Mint-Y icon theme for cinnamon
 
 Package: minuet
 Version: 26.08.2
@@ -12580,6 +12709,20 @@ SHA256: 3120efb5093c4aceab0dec7d484863ebb6c46b61d958b8fb2de5d1aa548b00a4
 Homepage: https://www.qt.io/
 Description: Qt 6 WebChannel Library
 
+Package: qt6-qtwebengine
+Version: 6.11.2
+Architecture: aarch64
+Maintainer: @licy183
+Installed-Size: 248128
+Depends: dbus, fontconfig, libc++, libexpat, libjpeg-turbo, libminizip, libnspr, libnss, libopus, libpng, libsnappy, libvpx, libwebp, libx11, libxkbfile, mesa, pulseaudio, qt6-qtbase (>= 6.11.2), qt6-qtdeclarative (>= 6.11.2), qt6-qtwebchannel (>= 6.11.2), zlib
+Filename: pool/main/q/qt6-qtwebengine/qt6-qtwebengine_6.11.2_aarch64.deb
+Size: 71650908
+MD5sum: 36182f88610d98351680cc3a87d8b636
+SHA1: df62f631ec298fd90f62a55f8c769d8a91bbf380
+SHA256: 43e7d737b3db952f51ce41ae34ec73ae0cd5c20d692a930370c592e027d8cfdd
+Homepage: https://www.qt.io/
+Description: Qt 6 WebEngine Library
+
 Package: qt6-qtwebsockets
 Version: 6.12.0
 Architecture: aarch64
@@ -13813,6 +13956,20 @@ SHA256: 5ee93b316b395d3d103f8e83fa15b4387dd9527245200e826220fbe5d2efc0b8
 Homepage: https://github.com/Martchus/tagparser
 Description: C++ library for reading and writing MP4 (iTunes), ID3, Vorbis, Opus, FLAC and Matroska tags
 
+Package: telegram-desktop
+Version: 7.3.1
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 318924
+Depends: abseil-cpp, boost, ffmpeg, glib, hicolor-icon-theme, hunspell, kf6-kcoreaddons, libandroid-shmem, libc++, libdispatch, libdrm, libjxl, liblz4, libminizip, protobuf, librnnoise, libsigc++-3.0, libx11, libxcomposite, libxdamage, libxrandr, libxtst, openal-soft, opengl, openh264, openssl, pipewire, pulseaudio, qt6-qtbase, qt6-qtimageformats, qt6-qtshadertools, qt6-qtsvg, qt6-qtwayland, xxhash, zlib
+Filename: pool/main/t/telegram-desktop/telegram-desktop_7.3.1_aarch64.deb
+Size: 69937500
+MD5sum: 37cb34b0d79dd0a14aa62de335fd2071
+SHA1: 5996150609920139c83b43a4ca1e72b642a8d4b4
+SHA256: a9f9d10b55f41da0c0769c97d28948653a44adc308e3d402ca8304c64a8a650e
+Homepage: https://desktop.telegram.org/
+Description: Telegram Desktop Client
+
 Package: telegram-desktop-static
 Version: 7.3.1
 Architecture: aarch64
@@ -14003,6 +14160,20 @@ SHA1: 982d06ff7533d4c8b277e991572c20439de576c4
 SHA256: b503804febee6fe9a03a545f42e16a49db5a341f4ce158ee8257c6842c41ae3f
 Homepage: https://docs.xfce.org/xfce/thunar/archive
 Description: This plugin allows one to extract and create archive from inside the Thunar file manager.
+
+Package: thunderbird
+Version: 157.0.1
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 289676
+Depends: botan3, ffmpeg, fontconfig, freetype, gdk-pixbuf, glib, gtk3, libandroid-shmem, libandroid-spawn, libc++, libcairo, libevent, libffi, libice, libicu, libjpeg-turbo, libnspr, libnss, libotr, libpixman, libsm, libvpx, libwebp, libx11, libxcb, libxcomposite, libxdamage, libxext, libxfixes, libxrandr, libxtst, pango, pulseaudio, zlib
+Filename: pool/main/t/thunderbird/thunderbird_157.0.1_aarch64.deb
+Size: 78521810
+MD5sum: ee4b72a6db3b88f5e64b6e3f68164d0a
+SHA1: cf541c8b791d5a38de72dab8928fb375ff3c120b
+SHA256: 95bc16587e3cfb63112e52d54115d2f877d94207e49b526673cf2b799f354622
+Homepage: https://www.thunderbird.net
+Description: Standalone mail and news reader from mozilla.org
 
 Package: tigervnc
 Version: 1.16.2-1
@@ -14403,6 +14574,20 @@ SHA1: d025035bdafcbe9021f77af9cef066cb3671901a
 SHA256: 2d82b7ab39bb94802881610f4522a27860d66ca6c9c165a0a5e0f28f128ee5ca
 Homepage: https://wezterm.org/
 Description: GPU-accelerated cross-platform terminal emulator and multiplexer (development branch)
+
+Package: wine-stable
+Version: 11.0-2
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 3168896
+Depends: fontconfig, freetype, krb5, libandroid-spawn, libc++, libgmp, libgnutls, libxcb, libxcomposite, libxcursor, libxfixes, libxrender, opengl, pulseaudio, sdl2 | sdl2-compat, vulkan-loader, xorg-xrandr
+Filename: pool/main/w/wine-stable/wine-stable_11.0-2_aarch64.deb
+Size: 88349136
+MD5sum: 2e0c80907ba0ee3f9c45302c2dacc591
+SHA1: 39047798dfd324c37e305e757a5a0f631f738ba8
+SHA256: bfa2f8c069c9790d2ce750572e4cf3fff3ddcf9d4a3ae6574f70f10e1ab241da
+Homepage: https://www.winehq.org/
+Description: A compatibility layer for running Windows programs
 
 Package: wireshark-qt
 Version: 4.6.9
@@ -16092,6 +16277,20 @@ SHA256: 2981a16009bbb70a0422cd568b53b57a40e958a8f18364f1cbed0830db4b7fc9
 Homepage: https://github.com/neutrinolabs/xrdp
 Description: Static libraries for xrdp
 
+Package: xscreensaver
+Version: 6.16
+Architecture: aarch64
+Maintainer: @termux
+Installed-Size: 102652
+Depends: at-spi2-core, gdk-pixbuf, glib, glu, gtk3, opengl, libandroid-shmem, libjpeg-turbo, libx11, libxext, libxft, libxi, libxml2, libxmu, libxrandr, libxt, libxxf86vm, xdg-utils
+Filename: pool/main/x/xscreensaver/xscreensaver_6.16_aarch64.deb
+Size: 73592810
+MD5sum: 10cceea355397baa8702eed94e7359cb
+SHA1: 38c926b04c37d62acffedf08b0fc10208813e09f
+SHA256: 082b6706d3da6169c487a6c270a53964ea68e8a0979a740be6500eee60c84001
+Homepage: https://www.jwz.org/xscreensaver
+Description: Screen saver and OpenGL demos for the X Window System
+
 Package: xsel
 Version: 1.2.1
 Architecture: aarch64
@@ -16302,6 +16501,35 @@ SHA1: ab9362062e657af0b05aeed50752b6257f560ca3
 SHA256: d5fea615708e948d14f1c758172ba825ec6ec93bb3dc0662efcc788143fa73e7
 Homepage: https://zealdocs.org/
 Description: Offline documentation browser
+
+Package: zed
+Version: 1.21.0
+Architecture: aarch64
+Maintainer: Gouranga Das Samrat <gouranga.das.khulna@gmail.com>
+Installed-Size: 331448
+Depends: alsa-lib, fontconfig, freetype, libwayland, libx11, libxcb, libxkbcommon, openssl, vulkan-loader-generic, zlib
+Recommends: git, vulkan-icd
+Filename: pool/main/z/zed/zed_1.21.0_aarch64.deb
+Size: 79693106
+MD5sum: e9f8113cde6816bd099aa5083c9c7f27
+SHA1: bbdaac25c244f34f50939102262e4ff5b7a5a615
+SHA256: 864be72ede7755f6fc3a460c4b513f03cbbcd6963055202531cd8428367f9d5c
+Homepage: https://zed.dev
+Description: High-performance, multiplayer code editor
+
+Package: zen-browser
+Version: 1.23.2b
+Architecture: aarch64
+Maintainer: @sabamdarif
+Installed-Size: 301552
+Depends: ffmpeg, fontconfig, freetype, gdk-pixbuf, glib, gtk3, libandroid-shmem, libandroid-spawn, libc++, libcairo, libevent, libffi, libice, libicu, libjpeg-turbo, libnspr, libnss, libpixman, libsm, libvpx, libwebp, libx11, libxcb, libxcomposite, libxdamage, libxext, libxfixes, libxrandr, libxtst, pango, pulseaudio, zlib
+Filename: pool/main/z/zen-browser/zen-browser_1.23.2b_aarch64.deb
+Size: 93597670
+MD5sum: efe5d42e2dbdea54b01b801d326e1bc1
+SHA1: 09eee54ab02cb03e4c5957333053edf9a53aa162
+SHA256: 224c3c280507d8707166a52fe3346829fa474833fea7c0ef9235aaee051a5edc
+Homepage: https://zen-browser.app
+Description: Zen is a firefox-based browser with the aim of pushing your productivity to a new level!
 
 Package: zenity
 Version: 4.2.2-1
