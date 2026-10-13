@@ -1,0 +1,437 @@
+name: Generate XoDos APT Repo from release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Space/comma separated tags to merge. Leave empty to auto-discover xodos-XoDos-<repo>-p<N>-* tags."
+        required: false
+        default: ""
+      repos:
+        description: "Comma-separated repos to auto-discover (main,x11,root,glibc). Ignored if tags is provided."
+        required: false
+        default: "main,x11,root,glibc"
+      keep_old:
+        description: "Keep existing .deb files in docs/termux-*/pool/"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: generate-repo
+  cancel-in-progress: false
+
+jobs:
+  generate-repo:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+        ref: master
+
+    - name: Install tools
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq dpkg-dev apt-utils xz-utils zstd python3 jq
+
+    - name: Ensure .gitattributes protects binary files
+      run: |
+        set -euo pipefail
+        if [ ! -f .gitattributes ]; then
+          cat > .gitattributes <<'EOF'
+        *.deb binary
+        *.ddeb binary
+        *.gz binary
+        *.xz binary
+        *.zst binary
+        *.tar binary
+        *.zip binary
+        *.png binary
+        *.jpg binary
+        *.jpeg binary
+        *.gif binary
+        *.ico binary
+        *.so binary
+        *.a binary
+        *.o binary
+        *.woff binary
+        *.woff2 binary
+        *.ttf binary
+        *.otf binary
+        *.pdf binary
+        EOF
+        else
+          grep -q '^\s*\*\.deb binary' .gitattributes || echo '*.deb binary' >> .gitattributes
+          grep -q '^\s*\*\.gz binary'  .gitattributes || echo '*.gz binary'  >> .gitattributes
+          grep -q '^\s*\*\.xz binary'  .gitattributes || echo '*.xz binary'  >> .gitattributes
+        fi
+        cat .gitattributes
+
+    # ==================================================================
+    # 1. Resolve the list of tags
+    # ==================================================================
+    - name: Resolve tags
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        INPUT_TAGS: ${{ inputs.tags }}
+        INPUT_REPOS: ${{ inputs.repos }}
+      run: |
+        set -euo pipefail
+        mkdir -p /tmp/plan
+        : > /tmp/plan/tags.txt
+
+        if [ -n "$INPUT_TAGS" ]; then
+          TAGS_RAW="${INPUT_TAGS//,/ }"
+          read -a TAGS <<< "$TAGS_RAW"
+          printf '%s\n' "${TAGS[@]}" > /tmp/plan/tags.txt
+          echo ">>> User-provided tags (${#TAGS[@]}):"
+          printf '    %s\n' "${TAGS[@]}"
+        else
+          echo ">>> Auto-discovering tags for repos: $INPUT_REPOS"
+          REPOS_ALT=$(echo "$INPUT_REPOS" | tr ',' '|')
+          mapfile -t TAGS < <(
+            gh release list --repo "${{ github.repository }}" \
+              --limit 1000 \
+              --json tagName,createdAt \
+              --jq "sort_by(.createdAt) | .[].tagName | select(test(\"^xodos-XoDos-(${REPOS_ALT})-p[0-9]+-\"))"
+          )
+          if [ "${#TAGS[@]}" -eq 0 ]; then
+            echo "::error::No matching tags found. Expected: xodos-XoDos-<repo>-p<N>-<date>"
+            gh release list --repo "${{ github.repository }}" --limit 20 || true
+            exit 1
+          fi
+          printf '%s\n' "${TAGS[@]}" > /tmp/plan/tags.txt
+          echo ">>> Auto-discovered ${#TAGS[@]} tag(s):"
+          printf '    %s\n' "${TAGS[@]}"
+        fi
+
+    # ==================================================================
+    # 2. Parse tags, group by repo
+    # ==================================================================
+    - name: Parse and group tags by repo
+      run: |
+        set -euo pipefail
+        python3 << 'PYEOF'
+        import re, json
+        from collections import defaultdict
+
+        TAGS = [l.strip() for l in open("/tmp/plan/tags.txt") if l.strip()]
+        PAT = re.compile(r'^xodos-XoDos-(main|x11|root|glibc)-p(\d+)-(.+)$')
+
+        groups = defaultdict(list)
+        unparsed = []
+        for t in TAGS:
+            m = PAT.match(t)
+            if not m:
+                unparsed.append(t); continue
+            repo, part, ts = m.group(1), int(m.group(2)), m.group(3)
+            groups[repo].append({"tag": t, "part": part, "timestamp": ts})
+
+        for r in groups:
+            groups[r].sort(key=lambda x: (x["part"], x["timestamp"]))
+
+        print(">>> Parsed grouping:")
+        for r, items in sorted(groups.items()):
+            print(f"    {r}: {len(items)} part(s)")
+            for it in items:
+                print(f"        p{it['part']}  {it['tag']}")
+
+        if unparsed:
+            print(">>> WARNING: tags that don't match the pattern:")
+            for u in unparsed:
+                print(f"        {u}")
+        if not groups:
+            raise SystemExit("No tags could be parsed")
+        json.dump(groups, open("/tmp/plan/groups.json","w"), indent=2)
+        PYEOF
+        echo ""
+        echo ">>> groups.json:"
+        cat /tmp/plan/groups.json
+
+    # ==================================================================
+    # 3. Download every .deb from every part of every repo
+    # ==================================================================
+    - name: Download .deb files from all parts
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        rm -rf /tmp/raw-debs
+        mkdir -p /tmp/raw-debs
+
+        for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+          echo "=================================================="
+          echo ">>> repo: $repo"
+          echo "=================================================="
+          mkdir -p "/tmp/raw-debs/$repo"
+
+          for tag in $(jq -r --arg r "$repo" '.[$r][] | .tag' /tmp/plan/groups.json); do
+            echo ">>> downloading from tag: $tag"
+            tmpdir=$(mktemp -d)
+            if ! gh release download "$tag" \
+                   --repo "${{ github.repository }}" \
+                   --pattern "*.deb" \
+                   --dir "$tmpdir" 2>/tmp/dl_err.log
+            then
+              echo ">>> WARN: download failed for $tag"
+              head -5 /tmp/dl_err.log || true
+              rm -rf "$tmpdir"; continue
+            fi
+            n=$(find "$tmpdir" -maxdepth 1 -type f -name '*.deb' | wc -l)
+            echo "    downloaded $n .deb file(s)"
+            find "$tmpdir" -maxdepth 1 -type f -name '*.deb' -print0 \
+              | xargs -0r mv -t "/tmp/raw-debs/$repo/"
+            rm -rf "$tmpdir"
+          done
+
+          total=$(find "/tmp/raw-debs/$repo" -maxdepth 1 -type f -name '*.deb' | wc -l)
+          echo ">>> repo $repo: $total .deb file(s) total"
+        done
+
+    # ==================================================================
+    # 4. Validate, dedup (highest version wins), copy into pool
+    # ==================================================================
+    - name: Build per-repo pool
+      run: |
+        set -euo pipefail
+
+        declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
+        declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
+
+        for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+          echo "=================================================="
+          echo ">>> processing repo: $repo"
+          echo "=================================================="
+
+          dist="${DIST[$repo]}"
+          comp="${COMP[$repo]}"
+          outdir="docs/termux-${repo}"
+          pooldir="${outdir}/pool/${comp}"
+
+          if [ "${{ inputs.keep_old }}" != "true" ]; then
+            echo ">>> keep_old=false — wiping ${outdir}"
+            rm -rf "$outdir"
+          fi
+          mkdir -p "$pooldir"
+
+          # Extract (pkg, version, path) for every deb
+          tsv="/tmp/all-${repo}.tsv"
+          : > "$tsv"
+          valid=0; invalid=0
+          shopt -s nullglob
+          for deb in /tmp/raw-debs/"$repo"/*.deb; do
+            if ! dpkg-deb -I "$deb" >/dev/null 2>&1; then
+              echo ">>> SKIP invalid: $(basename "$deb")"
+              invalid=$((invalid + 1)); continue
+            fi
+            pkg=$(dpkg-deb -f "$deb" Package)
+            ver=$(dpkg-deb -f "$deb" Version)
+            printf '%s\t%s\t%s\n' "$pkg" "$ver" "$deb" >> "$tsv"
+            valid=$((valid + 1))
+          done
+          shopt -u nullglob
+          echo ">>> valid=${valid} invalid=${invalid}"
+
+          # Sort by pkg asc, then version desc (version-aware), keep first
+          winners="/tmp/winners-${repo}.tsv"
+          sort -t$'\t' -k1,1 -k2,2rV "$tsv" \
+            | awk -F'\t' '!seen[$1]++' \
+            > "$winners"
+
+          placed=0
+          while IFS=$'\t' read -r pkg ver path; do
+            [ -z "$pkg" ] && continue
+            first_letter=$(printf '%s' "$pkg" | cut -c1 | tr 'A-Z' 'a-z')
+            dest_dir="${pooldir}/${first_letter}/${pkg}"
+            mkdir -p "$dest_dir"
+            rm -f "$dest_dir"/"${pkg}"_*.deb 2>/dev/null || true
+            cp -a "$path" "$dest_dir/"
+            placed=$((placed + 1))
+          done < "$winners"
+
+          echo ">>> placed ${placed} unique package(s)"
+          echo ">>> pool size: $(find "$pooldir" -type f -name '*.deb' | wc -l)"
+        done
+
+    # ==================================================================
+    # 5. Generate Packages indexes per repo
+    # ==================================================================
+    - name: Generate Packages indexes
+      run: |
+        set -euo pipefail
+        declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
+        declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
+        : > /tmp/override.empty
+
+        for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+          dist="${DIST[$repo]}"
+          comp="${COMP[$repo]}"
+          outdir="docs/termux-${repo}"
+
+          echo "=================================================="
+          echo ">>> repo: $repo  (dist=$dist comp=$comp)"
+          echo "=================================================="
+
+          rm -rf "${outdir}/dists"
+          mkdir -p "${outdir}/dists/${dist}/${comp}/binary-aarch64"
+          mkdir -p "${outdir}/dists/${dist}/${comp}/binary-all"
+
+          cd "$outdir"
+
+          echo ">>> generating aarch64 Packages"
+          dpkg-scanpackages --multiversion "pool/${comp}" /tmp/override.empty \
+            > "dists/${dist}/${comp}/binary-aarch64/Packages"
+
+          echo ">>> generating binary-all Packages"
+          dpkg-scanpackages --multiversion --arch all "pool/${comp}" /tmp/override.empty \
+            > "dists/${dist}/${comp}/binary-all/Packages"
+
+          echo "    aarch64:    $(grep -c '^Package:' "dists/${dist}/${comp}/binary-aarch64/Packages" || true)"
+          echo "    binary-all: $(grep -c '^Package:' "dists/${dist}/${comp}/binary-all/Packages" || true)"
+          echo "    sample Filename:"
+          grep '^Filename:' "dists/${dist}/${comp}/binary-aarch64/Packages" | head -3 || true
+
+          cd - >/dev/null
+        done
+
+    # ==================================================================
+    # 6. Compress Packages with gzip only (GH Pages corrupts .xz)
+    # ==================================================================
+    - name: Compress Packages indexes
+      run: |
+        set -euo pipefail
+        declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
+        declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
+        for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+          dist="${DIST[$repo]}"; comp="${COMP[$repo]}"
+          for arch in aarch64 all; do
+            f="docs/termux-${repo}/dists/${dist}/${comp}/binary-${arch}/Packages"
+            [ -f "$f" ] || continue
+            gzip -kf -9 "$f"
+            rm -f "$f.xz"
+          done
+        done
+
+    # ==================================================================
+    # 7. Generate Release files per repo
+    # ==================================================================
+    - name: Generate Release files
+      run: |
+        set -euo pipefail
+        declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
+        declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
+        declare -A LABEL=(
+          [main]="xodiosx Termux main"
+          [x11]="xodiosx Termux x11"
+          [root]="xodiosx Termux root"
+          [glibc]="xodiosx Termux glibc"
+        )
+        for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+          dist="${DIST[$repo]}"; comp="${COMP[$repo]}"; label="${LABEL[$repo]}"
+          conf="/tmp/apt-ftparchive-${repo}.conf"
+          cat > "$conf" <<EOF
+        APT::FTPArchive::Release::Origin "xodiosx";
+        APT::FTPArchive::Release::Label "${label}";
+        APT::FTPArchive::Release::Suite "${dist}";
+        APT::FTPArchive::Release::Codename "${dist}";
+        APT::FTPArchive::Release::Architectures "aarch64 all";
+        APT::FTPArchive::Release::Components "${comp}";
+        APT::FTPArchive::Release::Description "xodiosx custom Termux ${repo} packages";
+        EOF
+          cd "docs/termux-${repo}"
+          apt-ftparchive -c "$conf" release "dists/${dist}" > "dists/${dist}/Release"
+          cp "dists/${dist}/Release" "dists/${dist}/InRelease"
+          cd - >/dev/null
+          echo ">>> termux-${repo}: dists/${dist}/Release written"
+        done
+
+    # ==================================================================
+    # 8. Sanity check
+    # ==================================================================
+    - name: Verify repo layout
+      run: |
+        set -euo pipefail
+        echo ">>> docs/ top level:"
+        ls -la docs/ | head -30
+
+        fail=0
+        for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+          echo ""
+          echo "=================================================="
+          echo ">>> checking termux-${repo}"
+          echo "=================================================="
+
+          pkg_file=$(find "docs/termux-${repo}/dists" -type f -name 'Packages' | head -1)
+          if [ -z "$pkg_file" ]; then
+            echo "::error::No Packages file for $repo"; fail=$((fail+1)); continue
+          fi
+
+          bad=0
+          while IFS= read -r line; do
+            case "$line" in
+              Filename:\ pool/*) : ;;
+              Filename:\ *) echo "  BAD: $line"; bad=$((bad+1)) ;;
+            esac
+          done < <(grep '^Filename:' "$pkg_file" || true)
+          if [ "$bad" -gt 0 ]; then
+            echo "::error::${bad} bad Filename entries in $repo"; fail=$((fail+1))
+          fi
+
+          rel_file=$(find "docs/termux-${repo}/dists" -type f -name 'Release' | head -1)
+          if [ -z "$rel_file" ]; then
+            echo "::error::No Release file for $repo"; fail=$((fail+1))
+          elif grep -q 'Packages\.xz' "$rel_file"; then
+            echo "::error::$repo Release references Packages.xz"; fail=$((fail+1))
+          fi
+
+          ndeb=$(find "docs/termux-${repo}/pool" -type f -name '*.deb' | wc -l)
+          echo "  .deb files in pool: $ndeb"
+          echo "  Packages file:      $pkg_file"
+          echo "  Release file:       $rel_file"
+        done
+
+        [ "$fail" -gt 0 ] && exit 1
+        echo ""
+        echo ">>> All checks passed"
+
+    # ==================================================================
+    # 9. Commit + push
+    # ==================================================================
+    - name: Commit & push docs
+      run: |
+        set -euo pipefail
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A docs/ .gitattributes
+        if git diff --cached --quiet; then
+          echo ">>> no changes — skipping commit"
+        else
+          git commit -m "Update APT repositories (multi-repo merge) [skip ci]"
+          git push
+        fi
+
+    - name: Summary
+      run: |
+        {
+          echo "## APT Repositories Generated"
+          echo ""
+          echo "Base URL: \`https://xodiosx.github.io/Termux-pkg-x/\`"
+          echo ""
+          echo "### Add these to \`\$PREFIX/etc/apt/sources.list.d/*.list\`"
+          echo ""
+          for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
+            case "$repo" in
+              main)  dist=stable; comp=main ;;
+              x11)   dist=x11;    comp=main ;;
+              root)  dist=root;   comp=stable ;;
+              glibc) dist=glibc;  comp=main ;;
+            esac
+            echo "\`\`\`"
+            echo "deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x/termux-${repo} ${dist} ${comp}"
+            echo "\`\`\`"
+          done
+        } >> $GITHUB_STEP_SUMMARY
