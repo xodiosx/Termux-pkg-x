@@ -19,6 +19,10 @@ on:
         description: "Keep existing .deb files in docs/termux-*/pool/"
         type: boolean
         default: true
+      push_batch_size:
+        description: "Files per git commit+push batch (lower = safer, more pushes)"
+        required: false
+        default: "150"
 
 permissions:
   contents: write
@@ -75,9 +79,6 @@ jobs:
         fi
         cat .gitattributes
 
-    # ==================================================================
-    # 1. Resolve tags — from SOURCE repo, not Pages repo
-    # ==================================================================
     - name: Resolve tags
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,7 +109,6 @@ jobs:
           )
           if [ "${#TAGS[@]}" -eq 0 ]; then
             echo "::error::No matching tags found in $SRC."
-            echo ">>> Recent releases in $SRC (for inspection):"
             gh release list --repo "$SRC" --limit 30 || true
             exit 1
           fi
@@ -117,9 +117,6 @@ jobs:
           printf '    %s\n' "${TAGS[@]}"
         fi
 
-    # ==================================================================
-    # 2. Parse tags, group by repo
-    # ==================================================================
     - name: Parse and group tags by repo
       run: |
         set -euo pipefail
@@ -156,13 +153,8 @@ jobs:
             raise SystemExit("No tags could be parsed")
         json.dump(groups, open("/tmp/plan/groups.json","w"), indent=2)
         PYEOF
-        echo ""
-        echo ">>> groups.json:"
         cat /tmp/plan/groups.json
 
-    # ==================================================================
-    # 3. Download every .deb from every part of every repo (SOURCE repo)
-    # ==================================================================
     - name: Download .deb files from all parts
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -202,9 +194,6 @@ jobs:
           echo ">>> repo $repo: $total .deb file(s) total"
         done
 
-    # ==================================================================
-    # 4. Validate, dedup (highest version wins), copy into pool
-    # ==================================================================
     - name: Build per-repo pool
       run: |
         set -euo pipefail
@@ -263,9 +252,6 @@ jobs:
           echo ">>> pool size: $(find "$pooldir" -type f -name '*.deb' | wc -l)"
         done
 
-    # ==================================================================
-    # 5. Generate Packages indexes per repo
-    # ==================================================================
     - name: Generate Packages indexes
       run: |
         set -euo pipefail
@@ -277,31 +263,22 @@ jobs:
           dist="${DIST[$repo]}"; comp="${COMP[$repo]}"
           outdir="docs/termux-${repo}"
 
-          echo "=================================================="
           echo ">>> repo: $repo  (dist=$dist comp=$comp)"
-          echo "=================================================="
-
           rm -rf "${outdir}/dists"
           mkdir -p "${outdir}/dists/${dist}/${comp}/binary-aarch64"
           mkdir -p "${outdir}/dists/${dist}/${comp}/binary-all"
 
           cd "$outdir"
-          echo ">>> aarch64 Packages"
           dpkg-scanpackages --multiversion "pool/${comp}" /tmp/override.empty \
             > "dists/${dist}/${comp}/binary-aarch64/Packages"
-          echo ">>> binary-all Packages"
           dpkg-scanpackages --multiversion --arch all "pool/${comp}" /tmp/override.empty \
             > "dists/${dist}/${comp}/binary-all/Packages"
 
           echo "    aarch64:    $(grep -c '^Package:' "dists/${dist}/${comp}/binary-aarch64/Packages" || true)"
           echo "    binary-all: $(grep -c '^Package:' "dists/${dist}/${comp}/binary-all/Packages" || true)"
-          grep '^Filename:' "dists/${dist}/${comp}/binary-aarch64/Packages" | head -3 || true
           cd - >/dev/null
         done
 
-    # ==================================================================
-    # 6. Compress Packages with gzip only (GH Pages corrupts .xz)
-    # ==================================================================
     - name: Compress Packages indexes
       run: |
         set -euo pipefail
@@ -317,9 +294,6 @@ jobs:
           done
         done
 
-    # ==================================================================
-    # 7. Generate Release files per repo
-    # ==================================================================
     - name: Generate Release files
       run: |
         set -euo pipefail
@@ -350,27 +324,15 @@ jobs:
           echo ">>> termux-${repo}: dists/${dist}/Release written"
         done
 
-    # ==================================================================
-    # 8. Sanity check
-    # ==================================================================
     - name: Verify repo layout
       run: |
         set -euo pipefail
-        echo ">>> docs/ top level:"
-        ls -la docs/ | head -30
-
         fail=0
         for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
-          echo ""
-          echo "=================================================="
-          echo ">>> checking termux-${repo}"
-          echo "=================================================="
-
           pkg_file=$(find "docs/termux-${repo}/dists" -type f -name 'Packages' | head -1)
           if [ -z "$pkg_file" ]; then
             echo "::error::No Packages file for $repo"; fail=$((fail+1)); continue
           fi
-
           bad=0
           while IFS= read -r line; do
             case "$line" in
@@ -381,39 +343,126 @@ jobs:
           if [ "$bad" -gt 0 ]; then
             echo "::error::${bad} bad Filename entries in $repo"; fail=$((fail+1))
           fi
-
           rel_file=$(find "docs/termux-${repo}/dists" -type f -name 'Release' | head -1)
           if [ -z "$rel_file" ]; then
             echo "::error::No Release file for $repo"; fail=$((fail+1))
           elif grep -q 'Packages\.xz' "$rel_file"; then
             echo "::error::$repo Release references Packages.xz"; fail=$((fail+1))
           fi
-
           ndeb=$(find "docs/termux-${repo}/pool" -type f -name '*.deb' | wc -l)
-          echo "  .deb files in pool: $ndeb"
-          echo "  Packages file:      $pkg_file"
-          echo "  Release file:       $rel_file"
+          echo "  $repo: $ndeb .deb, index=$pkg_file"
         done
-
         [ "$fail" -gt 0 ] && exit 1
-        echo ""
         echo ">>> All checks passed"
 
     # ==================================================================
-    # 9. Commit + push to PAGES repo (this repo)
+    # Commit & push — CHUNKED to avoid GitHub's RPC push limits.
+    #
+    # A single push of thousands of .deb files triggers HTTP 500.
+    # Strategy:
+    #   1. Raise git's HTTP buffer to 500 MB.
+    #   2. Stage all changes, snapshot the file list, unstage.
+    #   3. Commit + push in batches of <push_batch_size> files.
+    #   4. Retry each push up to 5 times with exponential backoff.
     # ==================================================================
-    - name: Commit & push docs
+    - name: Commit & push docs (chunked)
+      env:
+        BATCH_SIZE: ${{ inputs.push_batch_size }}
       run: |
-        set -euo pipefail
+        set -uo pipefail
+
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config http.postBuffer 524288000
+        git config http.lowSpeedLimit 0
+        git config http.lowSpeedTime 999999
+        git config core.compression 9
+
+        # Stage everything once so deletions/modifications/renames are included
         git add -A docs/ .gitattributes
-        if git diff --cached --quiet; then
-          echo ">>> no changes — skipping commit"
-        else
-          git commit -m "Update APT repositories (source: ${{ inputs.source_repo }}) [skip ci]"
-          git push
+
+        # Snapshot the list of changed paths (staged)
+        git diff --cached --name-only > /tmp/changed-files.txt || true
+        total=$(wc -l < /tmp/changed-files.txt)
+        echo ">>> total changed files: $total"
+
+        if [ "$total" -eq 0 ]; then
+          echo ">>> no changes — nothing to push"
+          exit 0
         fi
+
+        # Unstage so we can re-stage in batches
+        git reset -q
+
+        BATCH="${BATCH_SIZE:-150}"
+        case "$BATCH" in
+          ''|*[!0-9]*) BATCH=150 ;;
+        esac
+        [ "$BATCH" -lt 20 ] && BATCH=20
+
+        batches=$(( (total + BATCH - 1) / BATCH ))
+        echo ">>> pushing in $batches batch(es) of up to $BATCH files each"
+
+        push_with_retry() {
+          local attempt
+          for attempt in 1 2 3 4 5; do
+            echo "    push attempt $attempt/5 ..."
+            if git push origin HEAD 2>/tmp/push_err.log; then
+              echo "    push ok"
+              return 0
+            fi
+            echo "    push failed. tail of error:"
+            tail -5 /tmp/push_err.log | sed 's/^/        /' || true
+            local backoff=$((attempt * 15))
+            echo "    sleeping ${backoff}s before retry"
+            sleep "$backoff"
+          done
+          return 1
+        }
+
+        i=0
+        batch_num=0
+        while [ "$i" -lt "$total" ]; do
+          batch_num=$(( batch_num + 1 ))
+          end=$(( i + BATCH ))
+          [ "$end" -gt "$total" ] && end=$total
+
+          echo "=================================================="
+          echo ">>> batch $batch_num/$batches  (files $((i+1))..$end of $total)"
+          echo "=================================================="
+
+          # Stage this batch
+          sed -n "$((i+1)),${end}p" /tmp/changed-files.txt > /tmp/batch-list.txt
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            git add -- "$f" 2>/dev/null || true
+          done < /tmp/batch-list.txt
+
+          # If nothing staged (e.g. all deletes already committed), skip
+          if git diff --cached --quiet; then
+            echo "    nothing staged in this batch — skipping"
+            i=$end
+            continue
+          fi
+
+          git commit -q -m "Update APT repository (batch $batch_num/$batches) [skip ci]" \
+            -m "Source: ${{ inputs.source_repo }}" || {
+              echo "::error::commit failed for batch $batch_num"
+              exit 1
+            }
+
+          if ! push_with_retry; then
+            echo "::error::push failed for batch $batch_num after 5 attempts"
+            exit 1
+          fi
+
+          i=$end
+        done
+
+        echo ""
+        echo "=================================================="
+        echo ">>> all $batches batch(es) pushed successfully"
+        echo "=================================================="
 
     - name: Summary
       run: |
@@ -423,8 +472,6 @@ jobs:
           echo "Source of .deb releases: \`${{ inputs.source_repo }}\`"
           echo ""
           echo "Base URL: \`https://xodiosx.github.io/Termux-pkg-x/\`"
-          echo ""
-          echo "### Add these to \`\$PREFIX/etc/apt/sources.list.d/*.list\`"
           echo ""
           for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
             case "$repo" in
