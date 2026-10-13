@@ -764,6 +764,20 @@ SHA256: 67c1910486aed4b70314fea218b71af3d210ff80eabf1e354e729f611f770d84
 Homepage: https://github.com/fribidi/fribidi/
 Description: Implementation of the Unicode Bidirectional Algorithm
 
+Package: gcc-glibc
+Version: 14.2.1-1
+Architecture: aarch64
+Maintainer: @termux-pacman
+Installed-Size: 324440
+Depends: binutils-glibc, libmpc-glibc, zstd-glibc, libisl-glibc, gcc-libs-glibc (= 14.2.1-1)
+Filename: pool/main/g/gcc-glibc/gcc-glibc_14.2.1-1_aarch64.deb
+Size: 72955212
+MD5sum: 0f890cb3eeeb61001ab43acb458095bf
+SHA1: 7200812bca55248c5508c206c998165f2b816314
+SHA256: 6f95967530331cd5a321a74627d8881cbde6d9f4f74642d12cdab37d24f1e263
+Homepage: https://gcc.gnu.org/
+Description: The GNU Compiler Collection - C and C++ frontends, with Fortran front-end for GCC
+
 Package: gcc-libs-dev-glibc32
 Version: 15.1.0-1
 Architecture: aarch64
@@ -4325,6 +4339,20 @@ SHA1: 000f97198da3b123d37ed0b5101675b246f064fc
 SHA256: ce7d019f5eda17fd8e704c285a0e6f0872a0d13dae4711c2ed39b04174c3a521
 Homepage: https://github.com/flightlessmango/MangoHud/
 Description: A Vulkan overlay layer for monitoring FPS, temperatures, CPU/GPU load and more
+
+Package: mariadb-glibc
+Version: 12.3.3
+Architecture: aarch64
+Maintainer: @termux-pacman
+Installed-Size: 547256
+Depends: openssl-glibc, libxcrypt-glibc, pcre2-glibc, zlib-glibc, zstd-glibc, ncurses-glibc, libbz2-glibc, libxml2-glibc, liblz4-glibc, perl-glibc
+Filename: pool/main/m/mariadb-glibc/mariadb-glibc_12.3.3_aarch64.deb
+Size: 99987500
+MD5sum: 5172fe133af7c6b6b7f99037366f01d2
+SHA1: e02793aee3a66f549d6634cbf5a732305fc0b19e
+SHA256: 595bde73789f11cdcf1968368adb55ca7581163147c213ca70f8ec7dfbb0609b
+Homepage: https://mariadb.org
+Description: A drop-in replacement for mysql server
 
 Package: mariadb-glibc-static
 Version: 12.3.3

@@ -747,6 +747,19 @@ SHA256: 66e46f682b857c539369096d04cb0d2bf56878dad78c2c54e2c6a45efbd632df
 Homepage: https://github.com/dylanaraps/fff
 Description: A simple file manager written in bash
 
+Package: gap-packages
+Version: 4.16.1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 107300
+Filename: pool/main/g/gap-packages/gap-packages_4.16.1_all.deb
+Size: 94833650
+MD5sum: a8da6880285879431d85a5a464d76b18
+SHA1: 6567cd721964293dc94e1e6bd5e8143360a500eb
+SHA256: 54b4acd0f6f69a36e01407c63352fc53c0cce9cb4ad5af4e6bd3fed37d502e38
+Homepage: https://www.gap-system.org/
+Description: Packages for gap
+
 Package: geoip2-database
 Version: 20191221-2
 Architecture: all
@@ -993,6 +1006,20 @@ SHA256: 6aa69b30c5dcb0b2672ad1b47b20eb2cbf3765356aed6b8a428315fd0294905d
 Homepage: https://smxi.org/site/about.htm#inxi
 Description: Full featured CLI system information tool
 
+Package: jadx
+Version: 1.5.6
+Architecture: all
+Maintainer: @termux
+Installed-Size: 76512
+Depends: openjdk-21
+Filename: pool/main/j/jadx/jadx_1.5.6_all.deb
+Size: 71763994
+MD5sum: c45768eb246b318557e4971fd5f708a3
+SHA1: 50e21f437d74c4d9512778b620059e009f2c9fdf
+SHA256: 3f5d454299b8c58cb0493d43b1487c235ccdd4a6edba339382dc994a4210536d
+Homepage: https://github.com/skylot/jadx
+Description: Dex to Java decompiler
+
 Package: jadx-x
 Version: 1.5.6
 Architecture: all
@@ -1049,6 +1076,20 @@ SHA256: 562ace6c2b71c6fa82e2d26491e65ef666cf88df8145f060534ac9b8613f852b
 Homepage: https://kernel-seeds.org/projects/keychain/
 Description: Keychain manager for ssh-agent and gpg-agent
 
+Package: kotlin
+Version: 2.4.21
+Architecture: all
+Maintainer: @termux
+Installed-Size: 95436
+Depends: openjdk-21
+Filename: pool/main/k/kotlin/kotlin_2.4.21_all.deb
+Size: 87391678
+MD5sum: 140fe74ba7e0c6aef340fbfaacddd64b
+SHA1: 8095443d2b81c0223dafdbbec40e2165a1355c0e
+SHA256: 390690f656978ed259d43301d98c43ab88207516812af40165b073d28ed60213
+Homepage: https://kotlinlang.org/
+Description: The Kotlin Programming Language
+
 Package: lesspipe
 Version: 2.28
 Architecture: all
@@ -1090,6 +1131,319 @@ SHA1: e462ebb73e7b4752ab1c433c6212a6d8c252e5c5
 SHA256: a174aafbe3fa3acaf55fd7331f3ab01af6d3799675edd30ff705d591a63b5952
 Homepage: https://www.bouncycastle.org/java.html
 Description: A lightweight cryptography API for Java
+
+Package: libclc
+Version: 21.1.3-1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 72028
+Filename: pool/main/l/libclc/libclc_21.1.3-1_all.deb
+Size: 10216016
+MD5sum: b1fbf808279048dbe9e9ab2283dd5787
+SHA1: c2d8c5fd77ca58e7384295b989d4e9c0dc9e19c6
+SHA256: 1638ea0ce776c6ad908eea3db658a6ca9a8a54789575e28a4bb04de485838a3b
+Homepage: https://libclc.llvm.org/
+Description: Open source implementation of the library requirements of the OpenCL C programming language
+
+Package: libcommons-lang3-java
+Version: 3.21.0
+Architecture: all
+Maintainer: @termux
+Installed-Size: 664
+Depends: openjdk-21
+Filename: pool/main/l/libcommons-lang3-java/libcommons-lang3-java_3.21.0_all.deb
+Size: 563290
+MD5sum: ac78ceddc213a05d6667ea905f3c6225
+SHA1: 3545f12c384697735020986abc462c1a25193e8f
+SHA256: 773bfda0110c5dcec60a584746fe2b1786e4acd5336a04376a4b4f4075d1fb1b
+Homepage: https://commons.apache.org/proper/commons-lang/
+Description: A host of helper utilities for the java.lang API
+
+Package: libglvnd-dev
+Version: 1.7.0-1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 2316
+Breaks: mesa (<< 22.3.3-2), mesa-dev (<< 22.3.3-2), ndk-sysroot (<< 25b-3)
+Replaces: mesa (<< 22.3.3-2), mesa-dev (<< 22.3.3-2), ndk-sysroot (<< 25b-3)
+Filename: pool/main/l/libglvnd-dev/libglvnd-dev_1.7.0-1_all.deb
+Size: 154696
+MD5sum: 8496cc2d24e93ff77b5f56e8e4e0be5a
+SHA1: def7177a6831063db2cde406c1e5a511653a46d6
+SHA256: 834274f1bd230bcad24ede117ebb1fd914b698cb9370857c7dd9a6c9b0103d5e
+Homepage: https://gitlab.freedesktop.org/glvnd/libglvnd
+Description: GLVND's OpenGL headers
+
+Package: libosmium
+Version: 2.23.1-1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 2124
+Filename: pool/main/l/libosmium/libosmium_2.23.1-1_all.deb
+Size: 176768
+MD5sum: 84447e5d78ae0170a23926cda40bdc92
+SHA1: c215fcf22970acbf2b3d695651ea7a1ea3dcaea4
+SHA256: 5ab466200fc1e12619db618b4eeb8dfc41cf69e8be9d7aaef2e515d06a25b454
+Homepage: https://osmcode.org/libosmium/
+Description: Library for reading from and writing to OSM files in XML and PBF formats
+
+Package: libregexp-assemble-perl
+Version: 0.38-9
+Architecture: all
+Maintainer: @termux
+Installed-Size: 200
+Depends: perl
+Filename: pool/main/l/libregexp-assemble-perl/libregexp-assemble-perl_0.38-9_all.deb
+Size: 52644
+MD5sum: a58e58475167d83f8d71ba0745a2072f
+SHA1: 22ed2de67e079c82e5438094f949d94304fbd306
+SHA256: 51f7729f4826f0216dc39f027ba7f01a51bb1b1d24c5b6281a9e823f43b6561c
+Homepage: https://metacpan.org/pod/Regexp::Assemble
+Description: Perl module to merge several regular expressions
+
+Package: libspice-protocol
+Version: 0.14.5
+Architecture: all
+Maintainer: @termux
+Installed-Size: 180
+Filename: pool/main/l/libspice-protocol/libspice-protocol_0.14.5_all.deb
+Size: 19122
+MD5sum: 11bc4c533218e628969cc82f6e5ada74
+SHA1: 406623d12449cc7880abd750039ae529068ae61f
+SHA256: 7ab4d7317cab9c184c4d8fc766c5efbfb4b5db3943e2df513d7def3caf0e349f
+Homepage: https://www.spice-space.org/
+Description: SPICE protocol headers
+
+Package: libwayland-cross-scanner
+Version: 1.26.0
+Architecture: all
+Maintainer: @termux
+Installed-Size: 400
+Depends: libwayland (= 1.26.0)
+Filename: pool/main/l/libwayland-cross-scanner/libwayland-cross-scanner_1.26.0_all.deb
+Size: 91618
+MD5sum: df8c8c07f9b983eba67b7a54ec4a2d0e
+SHA1: 9bb6327c2f011797623f7e6bd1a1443da5f8cee7
+SHA256: 215e4e53f65559a7eb4f94a926a86860cce8ba913d655d8fbf21a85815002d76
+Homepage: https://wayland.freedesktop.org/
+Description: wayland-scanner for host (NOT for Termux)
+
+Package: libwayland-protocols
+Version: 1.49
+Architecture: all
+Maintainer: @termux
+Installed-Size: 1592
+Filename: pool/main/l/libwayland-protocols/libwayland-protocols_1.49_all.deb
+Size: 133414
+MD5sum: 0de2d676e3134a443b32b09465425fe6
+SHA1: e51a0f1b51215a971f59d04ef9c9bb5a0c66fbbb
+SHA256: 6b13ebac25bda941989f609c735f9c4a9b09ec502fabf8a64f0197312e4e6507
+Homepage: https://wayland.freedesktop.org/
+Description: Wayland protocols library
+
+Package: llvm-mingw-w64
+Version: 20251216
+Architecture: all
+Maintainer: @licy183
+Installed-Size: 132
+Depends: clang (<< 22), llvm (<< 22), llvm-tools (<< 22), llvm-mingw-w64-libcompiler-rt, llvm-mingw-w64-ucrt
+Recommends: llvm-mingw-w64-tools
+Conflicts: mingw-w64
+Filename: pool/main/l/llvm-mingw-w64/llvm-mingw-w64_20251216_all.deb
+Size: 12018
+MD5sum: c7b47edb1950f116bc5ed10efb62a9cf
+SHA1: 9c69d7c28165cf63290a9039832dca710851fcea
+SHA256: 9fc048bbb16ade891cbf7f14fd008626bbf9079e380ec18cdfee3adbbcc9d534
+Homepage: https://github.com/mstorsjo/llvm-mingw
+Description: MinGW-w64 toolchain based on LLVM
+
+Package: llvm-mingw-w64-libcompiler-rt
+Version: 20251216
+Architecture: all
+Maintainer: @licy183
+Installed-Size: 20796
+Recommends: llvm-mingw-w64
+Filename: pool/main/l/llvm-mingw-w64-libcompiler-rt/llvm-mingw-w64-libcompiler-rt_20251216_all.deb
+Size: 2293646
+MD5sum: ab60516d4c56d7e9995dada7554e4dab
+SHA1: c3ac09976545eca69172c99ab52ec2bf318aa203
+SHA256: 325da7dfd27426f32d5aa5faf4b1f85b5344afa51e50a91cabe06bfecbe96191
+Homepage: https://github.com/mstorsjo/llvm-mingw
+Description: Compiler runtime libraries for LLVM-MinGW
+
+Package: llvm-mingw-w64-ucrt
+Version: 20251216
+Architecture: all
+Maintainer: @licy183
+Installed-Size: 396924
+Recommends: llvm-mingw-w64
+Filename: pool/main/l/llvm-mingw-w64-ucrt/llvm-mingw-w64-ucrt_20251216_all.deb
+Size: 33666118
+MD5sum: 2e1e846cfabf792e042dc99618320e42
+SHA1: ab47b31891e8aa02932a1cd7d3c6a46bb05d1e80
+SHA256: 9c532fe93388d71a62be6d68d1027db0beaf3ec930b0b25313ecd15f75520e0c
+Homepage: https://github.com/mstorsjo/llvm-mingw
+Description: MinGW-w64 runtime for LLVM-MinGW
+
+Package: lsix
+Version: 1.9.1-1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 52
+Depends: bash, imagemagick
+Filename: pool/main/l/lsix/lsix_1.9.1-1_all.deb
+Size: 5724
+MD5sum: 74f2373cecd26afacee8fa5059614e23
+SHA1: ed6e210523130b72291680421f2f6b8d39c7703d
+SHA256: 3a8aebdb91c326d6225b37f16086a425a8f40e7deea905ed4ac616e94259c25c
+Homepage: https://github.com/hackerb9/lsix
+Description: Shows thumbnails in terminal using sixel graphics
+
+Package: luarocks
+Version: 3.13.0-1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 1024
+Depends: curl, lua54
+Filename: pool/main/l/luarocks/luarocks_3.13.0-1_all.deb
+Size: 120626
+MD5sum: eb618542ccb428b7b67265c328dea92f
+SHA1: 84b181064cd2b2af19f1ed6cce5eb9a1dd3eabcb
+SHA256: dc179e52527f83dfa62438f9a71dda71652b27fa345d2f5bcc06f41f9f30d133
+Homepage: https://luarocks.org/
+Description: Deployment and management system for Lua modules
+
+Package: manpages
+Version: 6.19
+Architecture: all
+Maintainer: @termux
+Installed-Size: 18720
+Depends: mandoc
+Conflicts: linux-man-pages
+Replaces: linux-man-pages
+Provides: linux-man-pages
+Filename: pool/main/m/manpages/manpages_6.19_all.deb
+Size: 5696874
+MD5sum: e62becd7684bf59c2ba86be3ffa702c8
+SHA1: d76db9f6bc54e7b835a1f83d9fb1a63885964524
+SHA256: 4432e56ccb440cfa1fcc4c487dd4c33e5f36ff0cd3634c948b52d0d7188bcb56
+Homepage: https://www.kernel.org/doc/man-pages/
+Description: Man pages for linux kernel and C library interfaces
+
+Package: mdds
+Version: 3.2.1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 1272
+Filename: pool/main/m/mdds/mdds_3.2.1_all.deb
+Size: 127594
+MD5sum: 16b77e0897ca8dcc6e8997e4a0f8dabe
+SHA1: e53552880f9ab8ef89ac11f5531ede64c12efb3e
+SHA256: d589d78b2bdbbd9e6fedfb07582b83ba6f8a2dc7a23b92b627a83aaa935afa4e
+Homepage: https://gitlab.com/mdds/mdds
+Description: A collection of multi-dimensional data structures and indexing algorithms
+
+Package: media-types
+Version: 14.0.0
+Architecture: all
+Maintainer: @termux
+Installed-Size: 120
+Conflicts: mutt (<< 1.8.3-1)
+Breaks: mime-support
+Replaces: mime-support
+Provides: mime-support
+Filename: pool/main/m/media-types/media-types_14.0.0_all.deb
+Size: 20156
+MD5sum: 87551267826d8f13426d11f3e0638751
+SHA1: f9b0860d7e197017ae973a457c2ef03dd538b486
+SHA256: 66699e15ec552d75b17ed97d394df3628ef2ae9e70b976220bb6769c3044a3a0
+Homepage: https://pagure.io/mailcap
+Description: List of standard media types and their usual file extension
+
+Package: mesa-dev
+Version: 26.2.4
+Architecture: all
+Maintainer: @termux
+Installed-Size: 168
+Depends: libglvnd-dev
+Breaks: mesa (<< 22.3.3-2), ndk-sysroot (<< 25b-3)
+Replaces: mesa (<< 22.3.3-2), ndk-sysroot (<< 25b-3)
+Filename: pool/main/m/mesa-dev/mesa-dev_26.2.4_all.deb
+Size: 26134
+MD5sum: a0edcec5d691be199dc8ad8ead610920
+SHA1: c1129a995563840db0ff012294164d4620fe4741
+SHA256: a06ce3b05686fced4bbd9868ac2a7a3d6dd392f9d224a55add3954060c42366a
+Homepage: https://www.mesa3d.org
+Description: Mesa's OpenGL headers
+
+Package: mono-libs
+Version: 6.14.1-2
+Architecture: all
+Maintainer: @termux
+Installed-Size: 204220
+Breaks: mono (<< 6.12.0.122-2)
+Replaces: mono (<< 6.12.0.122-2)
+Filename: pool/main/m/mono-libs/mono-libs_6.14.1-2_all.deb
+Size: 54480554
+MD5sum: dc1016b03d0b3e1da0dcd64ed30ee3c9
+SHA1: a8c3d8f4b0faf8ac5d167d074aadae5e355912fd
+SHA256: 6f373146db44bda5f45823fd9c1825faf93ec41a7effe2308661681c171a0797
+Homepage: https://gitlab.winehq.org/mono/mono
+Description: Platform-independent libraries for mono
+
+Package: mypaint-brushes
+Version: 2.0.2
+Architecture: all
+Maintainer: @termux
+Installed-Size: 3836
+Filename: pool/main/m/mypaint-brushes/mypaint-brushes_2.0.2_all.deb
+Size: 1483340
+MD5sum: 0ea16872a75a8383cdd183387fcd614f
+SHA1: 483427c8a762f2d125a4d0849a1cf9a1f763f387
+SHA256: d206675b3007044f124c7cc3ad5b132cf8629ca4ac2d37eef0dc10ff05bd7a9b
+Homepage: https://github.com/mypaint/mypaint-brushes
+Description: MyPaint brushes
+
+Package: myrepos
+Version: 1.20180726-4
+Architecture: all
+Maintainer: Leonid Plyushch <leonid.plyushch@gmail.com>
+Installed-Size: 232
+Depends: git, perl
+Filename: pool/main/m/myrepos/myrepos_1.20180726-4_all.deb
+Size: 43172
+MD5sum: 9a5d49c0c68ba1ce40a901b058d5fee7
+SHA1: b708b5a40387e58a090a0f27e7c85b1c6adfb72c
+SHA256: e158153970c66ff47aac395a54512bea05d4ba76e12f6db40b8a2cf68083ad11
+Homepage: https://myrepos.branchable.com/
+Description: Tool to manage all your version control repos
+
+Package: ndk-multilib
+Version: 30
+Architecture: all
+Maintainer: @termux
+Installed-Size: 423064
+Filename: pool/main/n/ndk-multilib/ndk-multilib_30_all.deb
+Size: 80566932
+MD5sum: 82cb6dc6e0df26b89c8368465a646c7a
+SHA1: c958feea8ae4d09e7429e794350b895e3c091d39
+SHA256: e241aef954bcc048eb98769514db6cbe4c08fdefcfaf879c36aff633ac220d32
+Homepage: https://developer.android.com/tools/sdk/ndk/index.html
+Description: Multilib binaries for cross-compilation
+
+Package: neofetch
+Version: 7.1.0-1
+Architecture: all
+Maintainer: @termux
+Installed-Size: 396
+Depends: bash
+Filename: pool/main/n/neofetch/neofetch_7.1.0-1_all.deb
+Size: 82372
+MD5sum: d555383245657b32d0e8bc5b4d28d8cf
+SHA1: dbd087d06e49b230a1450844c540bcf3bbcf9413
+SHA256: 06cdc8db34ba99f2e4cbc2d0e19ec2b98160bc786e250b85a6d1d837af421caf
+Homepage: https://github.com/dylanaraps/neofetch
+Description: Simple system information script
 
 Package: notcurses-data
 Version: 3.0.17-2
@@ -2577,6 +2931,20 @@ SHA1: f3a358f94fd28ad840c4b7eef9cf5b8088679901
 SHA256: 8ea91dd5c97020ab68f2d66739a6eaabc268250047d5aa5caec381973ddf0511
 Homepage: https://github.com/KhronosGroup/Vulkan-Headers
 Description: Vulkan Header files and API registry
+
+Package: wasi-libc
+Version: 34+really34
+Architecture: all
+Maintainer: @termux
+Installed-Size: 431148
+Recommends: wasm-component-ld
+Filename: pool/main/w/wasi-libc/wasi-libc_34+really34_all.deb
+Size: 82303390
+MD5sum: 285868ca7b2ed9c90166e25a7bc91724
+SHA1: dfc6c4049d671beec95065d205b6da5d194608d7
+SHA256: 916027b09f99dd73d1b2232f116975b491bea0a2e38baed5302952cd66081097
+Homepage: https://wasi.dev/
+Description: Libc for WebAssembly programs built on top of WASI system calls
 
 Package: wgetpaste
 Version: 2.34
