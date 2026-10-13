@@ -1,8 +1,12 @@
-name: Generate XoDos APT Repo from release
+name: Generate APT Repository from Releases
 
 on:
   workflow_dispatch:
     inputs:
+      source_repo:
+        description: "GitHub repo that hosts the release tags (owner/name)"
+        required: true
+        default: "xodiosx/termux-packages"
       tags:
         description: "Space/comma separated tags to merge. Leave empty to auto-discover xodos-XoDos-<repo>-p<N>-* tags."
         required: false
@@ -27,7 +31,7 @@ jobs:
   generate-repo:
     runs-on: ubuntu-24.04
     steps:
-    - name: Checkout repository
+    - name: Checkout repository (Pages repo)
       uses: actions/checkout@v6
       with:
         fetch-depth: 1
@@ -72,17 +76,20 @@ jobs:
         cat .gitattributes
 
     # ==================================================================
-    # 1. Resolve the list of tags
+    # 1. Resolve tags — from SOURCE repo, not Pages repo
     # ==================================================================
     - name: Resolve tags
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SRC: ${{ inputs.source_repo }}
         INPUT_TAGS: ${{ inputs.tags }}
         INPUT_REPOS: ${{ inputs.repos }}
       run: |
         set -euo pipefail
         mkdir -p /tmp/plan
         : > /tmp/plan/tags.txt
+
+        echo ">>> Source repo for releases: $SRC"
 
         if [ -n "$INPUT_TAGS" ]; then
           TAGS_RAW="${INPUT_TAGS//,/ }"
@@ -91,17 +98,18 @@ jobs:
           echo ">>> User-provided tags (${#TAGS[@]}):"
           printf '    %s\n' "${TAGS[@]}"
         else
-          echo ">>> Auto-discovering tags for repos: $INPUT_REPOS"
+          echo ">>> Auto-discovering tags in $SRC for repos: $INPUT_REPOS"
           REPOS_ALT=$(echo "$INPUT_REPOS" | tr ',' '|')
           mapfile -t TAGS < <(
-            gh release list --repo "${{ github.repository }}" \
+            gh release list --repo "$SRC" \
               --limit 1000 \
               --json tagName,createdAt \
               --jq "sort_by(.createdAt) | .[].tagName | select(test(\"^xodos-XoDos-(${REPOS_ALT})-p[0-9]+-\"))"
           )
           if [ "${#TAGS[@]}" -eq 0 ]; then
-            echo "::error::No matching tags found. Expected: xodos-XoDos-<repo>-p<N>-<date>"
-            gh release list --repo "${{ github.repository }}" --limit 20 || true
+            echo "::error::No matching tags found in $SRC."
+            echo ">>> Recent releases in $SRC (for inspection):"
+            gh release list --repo "$SRC" --limit 30 || true
             exit 1
           fi
           printf '%s\n' "${TAGS[@]}" > /tmp/plan/tags.txt
@@ -153,11 +161,12 @@ jobs:
         cat /tmp/plan/groups.json
 
     # ==================================================================
-    # 3. Download every .deb from every part of every repo
+    # 3. Download every .deb from every part of every repo (SOURCE repo)
     # ==================================================================
     - name: Download .deb files from all parts
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SRC: ${{ inputs.source_repo }}
       run: |
         set -euo pipefail
         rm -rf /tmp/raw-debs
@@ -169,11 +178,12 @@ jobs:
           echo "=================================================="
           mkdir -p "/tmp/raw-debs/$repo"
 
-          for tag in $(jq -r --arg r "$repo" '.[$r][] | .tag' /tmp/plan/groups.json); do
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
             echo ">>> downloading from tag: $tag"
             tmpdir=$(mktemp -d)
             if ! gh release download "$tag" \
-                   --repo "${{ github.repository }}" \
+                   --repo "$SRC" \
                    --pattern "*.deb" \
                    --dir "$tmpdir" 2>/tmp/dl_err.log
             then
@@ -186,7 +196,7 @@ jobs:
             find "$tmpdir" -maxdepth 1 -type f -name '*.deb' -print0 \
               | xargs -0r mv -t "/tmp/raw-debs/$repo/"
             rm -rf "$tmpdir"
-          done
+          done < <(jq -r --arg r "$repo" '.[$r][] | .tag' /tmp/plan/groups.json)
 
           total=$(find "/tmp/raw-debs/$repo" -maxdepth 1 -type f -name '*.deb' | wc -l)
           echo ">>> repo $repo: $total .deb file(s) total"
@@ -198,7 +208,6 @@ jobs:
     - name: Build per-repo pool
       run: |
         set -euo pipefail
-
         declare -A DIST=( [main]=stable [x11]=x11 [root]=root [glibc]=glibc )
         declare -A COMP=( [main]=main   [x11]=main [root]=stable [glibc]=main )
 
@@ -207,8 +216,7 @@ jobs:
           echo ">>> processing repo: $repo"
           echo "=================================================="
 
-          dist="${DIST[$repo]}"
-          comp="${COMP[$repo]}"
+          dist="${DIST[$repo]}"; comp="${COMP[$repo]}"
           outdir="docs/termux-${repo}"
           pooldir="${outdir}/pool/${comp}"
 
@@ -218,7 +226,6 @@ jobs:
           fi
           mkdir -p "$pooldir"
 
-          # Extract (pkg, version, path) for every deb
           tsv="/tmp/all-${repo}.tsv"
           : > "$tsv"
           valid=0; invalid=0
@@ -236,7 +243,6 @@ jobs:
           shopt -u nullglob
           echo ">>> valid=${valid} invalid=${invalid}"
 
-          # Sort by pkg asc, then version desc (version-aware), keep first
           winners="/tmp/winners-${repo}.tsv"
           sort -t$'\t' -k1,1 -k2,2rV "$tsv" \
             | awk -F'\t' '!seen[$1]++' \
@@ -268,8 +274,7 @@ jobs:
         : > /tmp/override.empty
 
         for repo in $(jq -r 'keys[]' /tmp/plan/groups.json); do
-          dist="${DIST[$repo]}"
-          comp="${COMP[$repo]}"
+          dist="${DIST[$repo]}"; comp="${COMP[$repo]}"
           outdir="docs/termux-${repo}"
 
           echo "=================================================="
@@ -281,20 +286,16 @@ jobs:
           mkdir -p "${outdir}/dists/${dist}/${comp}/binary-all"
 
           cd "$outdir"
-
-          echo ">>> generating aarch64 Packages"
+          echo ">>> aarch64 Packages"
           dpkg-scanpackages --multiversion "pool/${comp}" /tmp/override.empty \
             > "dists/${dist}/${comp}/binary-aarch64/Packages"
-
-          echo ">>> generating binary-all Packages"
+          echo ">>> binary-all Packages"
           dpkg-scanpackages --multiversion --arch all "pool/${comp}" /tmp/override.empty \
             > "dists/${dist}/${comp}/binary-all/Packages"
 
           echo "    aarch64:    $(grep -c '^Package:' "dists/${dist}/${comp}/binary-aarch64/Packages" || true)"
           echo "    binary-all: $(grep -c '^Package:' "dists/${dist}/${comp}/binary-all/Packages" || true)"
-          echo "    sample Filename:"
           grep '^Filename:' "dists/${dist}/${comp}/binary-aarch64/Packages" | head -3 || true
-
           cd - >/dev/null
         done
 
@@ -399,7 +400,7 @@ jobs:
         echo ">>> All checks passed"
 
     # ==================================================================
-    # 9. Commit + push
+    # 9. Commit + push to PAGES repo (this repo)
     # ==================================================================
     - name: Commit & push docs
       run: |
@@ -410,7 +411,7 @@ jobs:
         if git diff --cached --quiet; then
           echo ">>> no changes — skipping commit"
         else
-          git commit -m "Update APT repositories (multi-repo merge) [skip ci]"
+          git commit -m "Update APT repositories (source: ${{ inputs.source_repo }}) [skip ci]"
           git push
         fi
 
@@ -418,6 +419,8 @@ jobs:
       run: |
         {
           echo "## APT Repositories Generated"
+          echo ""
+          echo "Source of .deb releases: \`${{ inputs.source_repo }}\`"
           echo ""
           echo "Base URL: \`https://xodiosx.github.io/Termux-pkg-x/\`"
           echo ""
