@@ -40,6 +40,9 @@ jobs:
           sudo apt-get install -y -qq dpkg-dev python3 curl gzip xz-utils
           pip install -q --upgrade "huggingface_hub<1.0"
 
+      # ==================================================================
+      # 1. Fetch Packages + list ALL .deb files recursively
+      # ==================================================================
       - name: Fetch Packages + list HF files
         run: |
           set -euo pipefail
@@ -61,21 +64,38 @@ jobs:
               repo_id=os.environ["HF_REPO"],
               repo_type="dataset",
           )
-          debs = [f for f in files if f.endswith(".deb") and "/" not in f]
-          print(">>> HF files total:", len(files), "| .deb at root:", len(debs))
-          with open("work/hf-debs.txt", "w") as fh:
+          print(">>> HF files total:", len(files))
+
+          # Keep every .deb anywhere in the repo (recursive)
+          debs = [f for f in files if f.endswith(".deb")]
+          print(">>> .deb files (any path):", len(debs))
+
+          # Group by basename so we can match on filename alone
+          with open("work/hf-debs-full.txt", "w") as fh:
               for f in sorted(debs):
                   fh.write(f + "\n")
+
+          # Also dump a basename -> fullpath map
+          with open("work/hf-debs-map.tsv", "w") as fh:
+              for f in sorted(debs):
+                  base = f.rsplit("/", 1)[-1]
+                  fh.write(base + "\t" + f + "\n")
+
+          # Show a sample so we can see where they live
+          print(">>> sample .deb paths:")
+          for f in sorted(debs)[:10]:
+              print("    ", f)
           PYEOF
           python3 /tmp/list_hf.py
 
-          if [ ! -s work/hf-debs.txt ]; then
-            echo "::error::No .deb files at HF root — run sync-to-hf first"
+          if [ ! -s work/hf-debs-full.txt ]; then
+            echo "::error::No .deb files anywhere on HF — run sync-to-hf / generate-repo first"
             exit 1
           fi
-          echo ">>> sample HF .deb names:"
-          head -10 work/hf-debs.txt | sed 's/^/    /'
 
+      # ==================================================================
+      # 2. Resolve + download by basename matching
+      # ==================================================================
       - name: Resolve and download .deb files
         run: |
           set -euo pipefail
@@ -115,7 +135,7 @@ jobs:
                       out.append(first)
               return out
 
-          # ---- Parse Packages ----
+          # ---- 1. Parse Packages ----
           info = {}
           provides = {}
           cur = {}
@@ -144,7 +164,7 @@ jobs:
 
           print(">>> parsed", len(info), "packages from Packages")
 
-          # ---- Resolve closure ----
+          # ---- 2. Resolve closure ----
           needed, queue = set(), []
           for e in essentials:
               if e in info and e not in needed:
@@ -175,29 +195,33 @@ jobs:
           print(">>> keeping", len(keep), "packages for arch", ARCH)
           print(">>> sample:", ", ".join(keep[:25]))
 
-          # ---- Match against HF files ----
-          hf_files = [l.strip() for l in open("work/hf-debs.txt") if l.strip()]
-          by_pkg = {}
-          for f in hf_files:
-              if "_" not in f:
+          # ---- 3. Load basename -> fullpath map from HF ----
+          base_to_full = {}
+          for line in open("work/hf-debs-map.tsv"):
+              line = line.rstrip("\n")
+              if not line:
                   continue
-              pkg = f.split("_", 1)[0]
-              by_pkg.setdefault(pkg, []).append(f)
+              parts = line.split("\t")
+              if len(parts) == 2:
+                  base_to_full[parts[0]] = parts[1]
 
-          print(">>> HF map:", len(by_pkg), "distinct package names")
+          print(">>> HF basename map:", len(base_to_full), "entries")
 
-          def pick_file(pkg):
-              cands = by_pkg.get(pkg, [])
+          # ---- 4. Pick the highest version for each package ----
+          def pick_basename(pkg):
+              # Candidates end in _<arch>.deb or _all.deb, start with "<pkg>_"
+              prefix = pkg + "_"
+              cands = []
+              for base in base_to_full:
+                  if not base.startswith(prefix):
+                      continue
+                  if base.endswith("_" + ARCH + ".deb") or base.endswith("_all.deb"):
+                      cands.append(base)
               if not cands:
                   return None
-              arch_c = [c for c in cands if ("_" + ARCH + ".deb") in c]
-              if not arch_c:
-                  arch_c = [c for c in cands if "_all.deb" in c]
-              if not arch_c:
-                  return None
-              return sorted(arch_c)[-1]
+              return sorted(cands)[-1]
 
-          # ---- Download ----
+          # ---- 5. Download ----
           os.makedirs("debs", exist_ok=True)
 
           def fetch(url, out):
@@ -216,24 +240,25 @@ jobs:
           ok = 0
           missing = []
           for pkg in keep:
-              fname = pick_file(pkg)
-              if not fname:
+              base = pick_basename(pkg)
+              if not base:
                   missing.append((pkg, "no .deb matching on HF"))
                   continue
-              encoded = urllib.parse.quote(fname, safe="")
+              full_path = base_to_full[base]
+              encoded = urllib.parse.quote(full_path, safe="/")
               url = HF_BASE + "/" + encoded
-              out = Path("debs") / fname
+              out = Path("debs") / base
               if fetch(url, out):
                   ok += 1
               else:
-                  missing.append((pkg, fname))
+                  missing.append((pkg, full_path))
 
           print(">>> downloaded:", ok, "| missing:", len(missing))
           for m in missing[:30]:
               print("    MISS", m[0], ":", m[1])
 
           if ok == 0:
-              sys.exit("::error::nothing downloaded — check HF .deb files")
+              sys.exit("::error::nothing downloaded — check HF .deb paths")
 
           with open("selected.txt", "w") as fh:
               for pkg in keep:
@@ -246,6 +271,7 @@ jobs:
           echo ">>> .deb count:"
           find debs -maxdepth 1 -name '*.deb' | wc -l
 
+      # ---- from here down, unchanged from your previous version ----
       - name: Extract into staging
         run: |
           set -euo pipefail
@@ -327,7 +353,6 @@ jobs:
             echo 'esac'
           } > staging/bin/pkg
           chmod 0755 staging/bin/pkg
-          echo ">>> pkg header:"
           head -3 staging/bin/pkg
 
       - name: Wipe mirrors dir + termux-change-repo
