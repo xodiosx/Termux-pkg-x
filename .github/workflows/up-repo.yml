@@ -37,7 +37,6 @@ jobs:
 
     # ==================================================================
     # 1. Resolve tags + group by repo
-    #    Longer prefixes first so "tur-on-device" isn't swallowed by "tur".
     # ==================================================================
     - name: Resolve and group tags
       env:
@@ -69,7 +68,6 @@ jobs:
 
         for tag in "${TAGS[@]}"; do
           case "$tag" in
-            # longer prefixes first
             xodos-XoDos-tur-continuous-p*) printf 'tur-continuous\t%s\n' "$tag" >> /tmp/plan/groups.txt ;;
             xodos-XoDos-tur-on-device-p*)  printf 'tur-on-device\t%s\n'  "$tag" >> /tmp/plan/groups.txt ;;
             xodos-XoDos-tur-p*)            printf 'tur\t%s\n'            "$tag" >> /tmp/plan/groups.txt ;;
@@ -125,12 +123,6 @@ jobs:
 
     # ==================================================================
     # 3. Build Packages files
-    #    Layout:
-    #      xodos-main/dists/stable/main/binary-aarch64/Packages.gz
-    #      xodos-x11/dists/x11/main/binary-aarch64/Packages.gz
-    #      xodos-root/dists/root/stable/binary-aarch64/Packages.gz
-    #      xodos-glibc/dists/glibc/main/binary-aarch64/Packages.gz
-    #      xodos-tur/dists/tur-packages/{tur,tur-on-device,tur-continuous}/...
     # ==================================================================
     - name: Build Packages files
       run: |
@@ -205,8 +197,7 @@ jobs:
         done < /tmp/plan/repos.txt
 
     # ==================================================================
-    # 4. Generate Release files — one per dist within each xodos-* folder
-    #    TUR: 3 components must be listed in one Release for tur-packages.
+    # 4. Generate Release files
     # ==================================================================
     - name: Generate Release files
       run: |
@@ -259,7 +250,8 @@ jobs:
         echo ">>> total size: $(du -sh "$BUILD" | awk '{print $1}')"
 
     # ==================================================================
-    # 5. Upload every xodos-* folder to Hugging Face as top-level dirs
+    # 5. Upload to Hugging Face
+    #    Inline python3 -c to avoid heredoc indentation issues.
     # ==================================================================
     - name: Upload to Hugging Face
       env:
@@ -267,38 +259,33 @@ jobs:
         HF_REPO: ${{ inputs.hf_repo_id }}
       run: |
         set -euo pipefail
-
-        python3 << 'PYEOF'
-import os, pathlib
-from huggingface_hub import HfApi
-
-api = HfApi()
-repo = os.environ['HF_REPO']
-token = os.environ['HF_TOKEN']
-
-api.create_repo(repo_id=repo, repo_type='dataset', exist_ok=True, token=token)
-print('>>> HF repo ready:', repo)
-
-targets = ['xodos-main', 'xodos-x11', 'xodos-root', 'xodos-glibc', 'xodos-tur']
-for t in targets:
-    local = pathlib.Path('/tmp/aptrepo') / t
-    if not local.is_dir():
-        print(f'>>> skip {t} (not built this run)')
-        continue
-    print(f'>>> uploading {t}/ ...')
-    api.upload_folder(
-        folder_path=str(local),
-        path_in_repo=t,
-        repo_id=repo,
-        repo_type='dataset',
-        token=token,
-        commit_message=f'Update {t} APT metadata',
-        delete_patterns=['*'],   # wipe stale files under this prefix only
-    )
-    print(f'>>> {t}/ uploaded')
-
-print('>>> all done')
-PYEOF
+        python3 -c "
+        import os, sys
+        from huggingface_hub import HfApi
+        api = HfApi()
+        repo = os.environ['HF_REPO']
+        token = os.environ['HF_TOKEN']
+        api.create_repo(repo_id=repo, repo_type='dataset', exist_ok=True, token=token)
+        print('>>> HF repo ready:', repo)
+        targets = ['xodos-main', 'xodos-x11', 'xodos-root', 'xodos-glibc', 'xodos-tur']
+        for t in targets:
+            local = '/tmp/aptrepo/' + t
+            if not os.path.isdir(local):
+                print('>>> skip ' + t + ' (not built this run)')
+                continue
+            print('>>> uploading ' + t + '/ ...')
+            api.upload_folder(
+                folder_path=local,
+                path_in_repo=t,
+                repo_id=repo,
+                repo_type='dataset',
+                token=token,
+                commit_message='Update ' + t + ' APT metadata',
+                delete_patterns=['*'],
+            )
+            print('>>> ' + t + '/ uploaded')
+        print('>>> all done')
+        "
 
     - name: Summary
       run: |
@@ -321,6 +308,4 @@ PYEOF
           echo '```'
           echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/xodos-tur tur-packages tur tur-on-device tur-continuous"
           echo '```'
-          echo ""
-          echo "Add all five lines to \`\$PREFIX/etc/apt/sources.list.d/xodos.list\`."
         } >> $GITHUB_STEP_SUMMARY
