@@ -15,7 +15,7 @@ on:
         type: boolean
         default: false
       use-repo-deps:
-        description: "Fetch dependencies from our repo instead of building them from source"
+        description: "Fetch dependencies from our HF repo instead of building them from source"
         type: boolean
         default: false
 
@@ -103,6 +103,13 @@ jobs:
         xargs -0 -r -n50 sed -i 's/com\.termux/app.xodos2/g'
         grep -nE '^TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh || true
 
+    # ==================================================================
+    # Patch termux-tools:
+    #   - ship a single default mirror file pointing to HF main
+    #   - drop termux-change-repo (nothing to change)
+    #   - replace pkg with a thin wrapper over apt (no mirror logic)
+    # Tab-indented, because termux lint-packages.sh requires tabs.
+    # ==================================================================
     - name: Patch termux-tools for custom repo (tab-indented)
       run: |
         set -euo pipefail
@@ -120,7 +127,7 @@ jobs:
           cat > "$MIRROR_DIR/default" <<'MIRROREOF'
         # This file is sourced by pkg
         WEIGHT=10
-        MAIN="https://xodiosx.github.io/Termux-pkg-x"
+        MAIN="https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-main"
         MIRROREOF
 
           rm -f "$TERMUX_PREFIX/bin/termux-change-repo"
@@ -179,19 +186,77 @@ jobs:
 
         echo "" >> "$TOOLS_BUILD"
         cat "$RAW" >> "$TOOLS_BUILD"
+        echo ">>> patched termux-tools (last 30 lines):"
+        tail -30 "$TOOLS_BUILD" | cat -A | head -30
 
+    # ==================================================================
+    # Patch apt:
+    #   - remove termux-keyring from DEPENDS
+    #   - append a new termux_step_post_make_install that writes the
+    #     multi-repo sources.list (4 HF repos + commented TUR)
+    # The appended function overrides the original because bash uses
+    # the last definition of a function in a sourced file.
+    # ==================================================================
     - name: Patch apt package (custom repo + no keyring)
       run: |
         set -euo pipefail
         APT_BUILD="packages/apt/build.sh"
         [ -f "$APT_BUILD" ] || { echo "::error::$APT_BUILD not found"; exit 1; }
+
+        # 1. Remove termux-keyring from DEPENDS (no signing keyring)
         sed -i 's/, termux-keyring//g' "$APT_BUILD"
         sed -i 's/termux-keyring, //g' "$APT_BUILD"
         sed -i 's/ termux-keyring//g'  "$APT_BUILD"
         sed -i 's/termux-keyring//g'   "$APT_BUILD"
-        sed -i 's|deb https://packages-cf\.termux\.dev/apt/termux-main/ stable main|deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x stable main|g' "$APT_BUILD"
-        sed -i 's|deb https://packages-cf\.termux\.dev/apt/termux-main stable main|deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x stable main|g'  "$APT_BUILD"
 
+        # 2. Append a new termux_step_post_make_install that writes
+        #    our multi-repo sources.list. Last definition wins in bash.
+        RAW=/tmp/apt-raw.txt
+        cat > "$RAW" <<'RAWEOF'
+        termux_step_post_make_install() {
+          cat > "$TERMUX_PREFIX/etc/apt/sources.list" <<'SLEOF'
+        deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-main stable main
+        deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-x11 x11 main
+        deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-root root stable
+        deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-glibc glibc main
+        # Uncomment to enable TUR (Termux User Repository):
+        # deb [trusted=yes] https://tur.kcubeterm.com tur-packages tur
+        SLEOF
+
+          ln -sfr "$TERMUX_PREFIX/lib/apt/methods/http" "$TERMUX_PREFIX/lib/apt/methods/tor"
+          ln -sfr "$TERMUX_PREFIX/lib/apt/methods/http" "$TERMUX_PREFIX/lib/apt/methods/tor+http"
+          ln -sfr "$TERMUX_PREFIX/lib/apt/methods/https" "$TERMUX_PREFIX/lib/apt/methods/tor+https"
+          local dir="$TERMUX_PREFIX/share/apt-transport-tor"
+          mkdir -p "$dir"
+          touch "$dir/.placeholder"
+        }
+        RAWEOF
+
+        awk '
+          {
+            if (match($0, /^ +/)) {
+              n = RLENGTH
+              rest = substr($0, n + 1)
+              tabs = ""
+              for (i = 0; i < int(n / 2); i++) tabs = tabs "\t"
+              print tabs rest
+            } else {
+              print
+            }
+          }
+        ' "$RAW" > "$RAW.tab"
+        mv "$RAW.tab" "$RAW"
+
+        echo "" >> "$APT_BUILD"
+        cat "$RAW" >> "$APT_BUILD"
+        echo ">>> patched apt (last 30 lines):"
+        tail -30 "$APT_BUILD" | cat -A | head -30
+
+    # ==================================================================
+    # Override repository URL (setup variables):
+    #   - 4 HF repos in parallel arrays: URL / DISTRIBUTION / COMPONENT
+    #   - TUR entry is added as a comment for future enablement
+    # ==================================================================
     - name: Override repository URL (setup variables)
       run: |
         set -euo pipefail
@@ -208,14 +273,40 @@ jobs:
             in_comp && /^\)/                { in_comp=0; next }
             in_comp                         { next }
             /^TERMUX_BUILD_TUPLE=/ {
-              print "TERMUX_REPO_URL=(https://xodiosx.github.io/Termux-pkg-x)"
-              print "TERMUX_REPO_DISTRIBUTION=(stable)"
-              print "TERMUX_REPO_COMPONENT=(main)"
+              print "TERMUX_REPO_URL=("
+              print "https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-main"
+              print "https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-x11"
+              print "https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-root"
+              print "https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-glibc"
+              print "# Uncomment to enable TUR:"
+              print "# https://tur.kcubeterm.com"
+              print ")"
+              print "TERMUX_REPO_DISTRIBUTION=("
+              print "stable"
+              print "x11"
+              print "root"
+              print "glibc"
+              print "# tur-packages"
+              print ")"
+              print "TERMUX_REPO_COMPONENT=("
+              print "main"
+              print "main"
+              print "stable"
+              print "main"
+              print "# tur"
+              print ")"
             }
             { print }
           ' "$SETUP" > "$SETUP.new" && mv "$SETUP.new" "$SETUP"
+          echo ">>> patched setup variables:"
+          grep -nE '^TERMUX_REPO_(URL|DISTRIBUTION|COMPONENT)=' "$SETUP" || true
+          echo ">>> first 30 lines around the arrays:"
+          awk '/^TERMUX_REPO_URL=\(/,/^TERMUX_BUILD_TUPLE=/' "$SETUP" | head -30
         fi
 
+    # ==================================================================
+    # Configure dependency strategy
+    # ==================================================================
     - name: Configure dependency strategy
       env:
         USE_REPO_DEPS: ${{ github.event.inputs.use-repo-deps || 'false' }}
@@ -227,7 +318,7 @@ jobs:
         [ -f "$TDP" ] || { echo "::error::$TDP not found"; exit 1; }
 
         if [ "$USE_REPO_DEPS" = "true" ]; then
-          echo ">>> Dependencies fetched from https://xodiosx.github.io/Termux-pkg-x"
+          echo ">>> Dependencies fetched from Hugging Face repos"
           sed -i 's|Packages\.xz|Packages.gz|g' "$TDP"
           sed -i 's|xz -d|gzip -d|g'             "$TDP"
           sed -i 's|unxz|gunzip|g'               "$TDP"
@@ -311,15 +402,6 @@ jobs:
       if: ${{ steps.build-info.outputs.free-space == 'true' }}
       run: ./scripts/free-space.sh
 
-    # =================================================================
-    # Build packages.
-    #
-    # Same structure as the working version. Only change:
-    #   1. names -> paths (packages/X or x11-packages/X)
-    #   2. ask buildorder.py for topological order
-    #   3. filter that order back to just the requested packages
-    #   4. feed the ordered list to the same for-loop
-    # =================================================================
     - name: Build packages
       run: |
         set -euo pipefail
@@ -340,7 +422,6 @@ jobs:
 
         echo ">>> requested (${#packages[@]}): ${packages[*]}"
 
-        # ---- 1. names -> paths ----
         TARGET_PATHS=""
         for p in "${packages[@]}"; do
           if   [ -d "packages/$p" ];      then TARGET_PATHS="$TARGET_PATHS packages/$p"
@@ -351,7 +432,6 @@ jobs:
         done
         echo ">>> paths: $TARGET_PATHS"
 
-        # ---- 2. ask buildorder.py for the correct order ----
         : > /tmp/buildorder-full.txt
         if [ -f scripts/buildorder.py ] && [ -n "$TARGET_PATHS" ]; then
           echo ">>> Running buildorder.py..."
@@ -365,7 +445,6 @@ jobs:
           echo ">>> buildorder.py produced $(wc -l < /tmp/buildorder-full.txt) entries"
         fi
 
-        # ---- 3. filter to just the requested packages, in that order ----
         : > /tmp/ordered.txt
         if [ -s /tmp/buildorder-full.txt ]; then
           while read -r ordered_pkg; do
@@ -379,18 +458,15 @@ jobs:
           done < /tmp/buildorder-full.txt
         fi
 
-        # Append any requested packages not returned by buildorder.py
         for p in "${packages[@]}"; do
           grep -qx "$p" /tmp/ordered.txt || echo "$p" >> /tmp/ordered.txt
         done
 
-        # Dedupe, preserving order
         awk '!seen[$1]++' /tmp/ordered.txt > /tmp/ordered.dedup && mv /tmp/ordered.dedup /tmp/ordered.txt
 
         PKGS_STR="$(tr '\n' ' ' < /tmp/ordered.txt | sed 's/ *$//')"
         echo ">>> ordered build list (${#packages[@]}): $PKGS_STR"
 
-        # ---- 4. same inner-build generation as the working version ----
         {
           echo 'set -uo pipefail'
           echo 'PREFIX=/data/data/app.xodos2/files/usr'
