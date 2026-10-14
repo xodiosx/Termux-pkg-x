@@ -1,0 +1,32 @@
+Architectures: aarch64
+Codename: glibc
+Components: main
+Date: Wed, 14 Oct 2026 00:31:08 +0000
+Description: xodos Termux glibc (aarch64)
+Label: xodos Termux glibc
+Origin: xodos
+Suite: glibc
+MD5Sum:
+ db304763712c20bac9ca07fa8520f771              189 Release
+ 057643c8bf44bb986c4b50c67f478d07           223738 main/binary-aarch64/Packages
+ e3a49094201de751beb6318119360240            63342 main/binary-aarch64/Packages.gz
+ 1cea51f3e625d5abbbe1026321785139            13582 main/binary-all/Packages
+ f2244738c77850e490a10f6150ea0ae1             4630 main/binary-all/Packages.gz
+SHA1:
+ 3a8b78a448f434117dbdfe9fc0e942238eb44b9f              189 Release
+ bc79d67098bf675fa5b3f6f5a3217fa05e79d6dd           223738 main/binary-aarch64/Packages
+ eeae58b92431f8f832bfca733519059aeb8589da            63342 main/binary-aarch64/Packages.gz
+ c0dfabaa64a9b1ea285653b6bbba90cc806eadef            13582 main/binary-all/Packages
+ 8b12abcff65bda2085850dfc79b8829e09ca8dd2             4630 main/binary-all/Packages.gz
+SHA256:
+ da1321b7b1bb6be6f6de8187ce715a0b8d2fb4900817389d425d045c2bc088b1              189 Release
+ 9739cee532be012c3d41bd2d97055c8d7e8f02bd34ffdbe12cd2b7281629abb4           223738 main/binary-aarch64/Packages
+ e1ef7e3484af2769789b3808c808fdf2a00ee511544fc86793f12cd4496301d2            63342 main/binary-aarch64/Packages.gz
+ 28936f892be6e0b54f7a5380d30b9dcca165ed009eb4dfe0f6d77835362bd52c            13582 main/binary-all/Packages
+ 318d041e4afea2cf955a483f22e97ab80992160b63a7051131968d9ea8d7d718             4630 main/binary-all/Packages.gz
+SHA512:
+ 7bd2e768f9ca59398903853b00131d3db76735b2650af2579f3bdf7af531f3f0d011e5e4578afc13de20ce41164c869bb755a5c4c44f292cb8bc535d5e6b9187              189 Release
+ 103e2790f147fa6ef750d057b4d269c347bd152fe575fd396fd4e76a6ae2c2346ac252291beff5cd6dfcee43135f3ebf36b273d758de13ebeba893f638bcdb59           223738 main/binary-aarch64/Packages
+ 85ab40b1a79c645e3c7dce204c5a54906f02f516036a9088dd1121c04b66006f29bc5253f2c3df671c3051380a6e472cc2110f652ff9bb8fcd7bbc70ede7f01f            63342 main/binary-aarch64/Packages.gz
+ d9e1d8f7487e253c0747201588a8f8c7d4f787ebf1fa057f521872ac4f457894c3de8488dfe62524c419435f0d64f088ebe88f93d5da8c03725a5723e0f653d8            13582 main/binary-all/Packages
+ 0df908e1cde10b8e9c64775a214204f30c0902ca274c60208bd95fd6809db08d5342dc1d414a0b1d76686b1b4a115eefc14a44123a0b94f023de13e036698e34             4630 main/binary-all/Packages.gz
