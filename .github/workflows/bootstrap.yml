@@ -10,7 +10,7 @@ on:
         required: true
         default: "xodiosx/xodos-packages"
       arch:
-        description: "Comma-separated arch list, or 'all'"
+        description: "Arch"
         required: false
         default: "aarch64"
 
@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: generate-bootstrap
   cancel-in-progress: true
 
 jobs:
@@ -38,37 +38,55 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq dpkg-dev python3 curl gzip xz-utils
+          pip install -q --upgrade "huggingface_hub<1.0"
 
-      # ==================================================================
-      # 1. Fetch authoritative Packages index from HF
-      # ==================================================================
-      - name: Fetch Packages index from HF
+      - name: Fetch Packages + list HF files
         run: |
           set -euo pipefail
           mkdir -p work
+
           url="${HF_BASE}/xodos-main/dists/stable/main/binary-aarch64/Packages.gz"
           echo ">>> fetching $url"
           curl -fsSL --retry 4 --retry-delay 3 --max-time 120 \
             -o work/Packages.gz "$url" \
-            || { echo "::error::cannot fetch Packages.gz from HF"; exit 1; }
-
+            || { echo "::error::cannot fetch Packages.gz"; exit 1; }
           gunzip -f work/Packages.gz
-          n=$(grep -c '^Package:' work/Packages || true)
-          echo ">>> Packages entries: $n"
-          [ "$n" -gt 0 ] || { echo "::error::Packages is empty"; exit 1; }
+          echo ">>> Packages entries: $(grep -c '^Package:' work/Packages || true)"
 
-      # ==================================================================
-      # 2. Resolve minimal closure from HF Packages
-      # ==================================================================
-      - name: Resolve dependency closure
+          cat > /tmp/list_hf.py <<'PYEOF'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi()
+          files = api.list_repo_files(
+              repo_id=os.environ["HF_REPO"],
+              repo_type="dataset",
+          )
+          debs = [f for f in files if f.endswith(".deb") and "/" not in f]
+          print(">>> HF files total:", len(files), "| .deb at root:", len(debs))
+          with open("work/hf-debs.txt", "w") as fh:
+              for f in sorted(debs):
+                  fh.write(f + "\n")
+          PYEOF
+          python3 /tmp/list_hf.py
+
+          if [ ! -s work/hf-debs.txt ]; then
+            echo "::error::No .deb files at HF root — run sync-to-hf first"
+            exit 1
+          fi
+          echo ">>> sample HF .deb names:"
+          head -10 work/hf-debs.txt | sed 's/^/    /'
+
+      - name: Resolve and download .deb files
         run: |
           set -euo pipefail
+          mkdir -p debs
 
-          cat > /tmp/resolve.py <<'PYEOF'
-          import re, sys, os
+          cat > /tmp/download.py <<'PYEOF'
+          import os, re, sys, urllib.parse, urllib.request, shutil
+          from pathlib import Path
 
-          ARCH = os.environ["ARCH"]
-          pkgfile = "work/Packages"
+          ARCH    = os.environ["ARCH"]
+          HF_BASE = os.environ["HF_BASE"].rstrip("/")
 
           essentials = [
               "apt", "dpkg",
@@ -97,11 +115,11 @@ jobs:
                       out.append(first)
               return out
 
-          # Parse all Packages blocks
+          # ---- Parse Packages ----
           info = {}
           provides = {}
           cur = {}
-          for line in open(pkgfile):
+          for line in open("work/Packages"):
               line = line.rstrip("\n")
               if not line:
                   if cur.get("Package"):
@@ -111,7 +129,7 @@ jobs:
                           provides.setdefault(p, []).append(name)
                   cur = {}
                   continue
-              m = re.match(r'^([A-Za-z0-9_-]+):\s*(.*)$', line)
+              m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
               if m:
                   key, val = m.group(1), m.group(2)
                   if key == "Depends" and "Depends" in cur:
@@ -124,8 +142,9 @@ jobs:
               for p in parse_list(cur.get("Provides", "")):
                   provides.setdefault(p, []).append(name)
 
-          print(f">>> parsed {len(info)} packages")
+          print(">>> parsed", len(info), "packages from Packages")
 
+          # ---- Resolve closure ----
           needed, queue = set(), []
           for e in essentials:
               if e in info and e not in needed:
@@ -153,83 +172,80 @@ jobs:
               if arch == "all" or arch == ARCH:
                   keep.append(name)
 
-          print(f">>> keeping {len(keep)} packages for arch {ARCH}")
+          print(">>> keeping", len(keep), "packages for arch", ARCH)
+          print(">>> sample:", ", ".join(keep[:25]))
 
+          # ---- Match against HF files ----
+          hf_files = [l.strip() for l in open("work/hf-debs.txt") if l.strip()]
+          by_pkg = {}
+          for f in hf_files:
+              if "_" not in f:
+                  continue
+              pkg = f.split("_", 1)[0]
+              by_pkg.setdefault(pkg, []).append(f)
+
+          print(">>> HF map:", len(by_pkg), "distinct package names")
+
+          def pick_file(pkg):
+              cands = by_pkg.get(pkg, [])
+              if not cands:
+                  return None
+              arch_c = [c for c in cands if ("_" + ARCH + ".deb") in c]
+              if not arch_c:
+                  arch_c = [c for c in cands if "_all.deb" in c]
+              if not arch_c:
+                  return None
+              return sorted(arch_c)[-1]
+
+          # ---- Download ----
+          os.makedirs("debs", exist_ok=True)
+
+          def fetch(url, out):
+              if out.exists() and out.stat().st_size > 0:
+                  return True
+              try:
+                  with urllib.request.urlopen(url, timeout=300) as r, open(out, "wb") as f:
+                      shutil.copyfileobj(r, f)
+                  return True
+              except Exception as e:
+                  print("    FAIL", url, ":", e)
+                  if out.exists():
+                      out.unlink()
+                  return False
+
+          ok = 0
           missing = []
-          for name in keep:
-              for dep in parse_list(info[name].get("Depends", "")):
-                  if dep not in info and dep not in provides:
-                      missing.append(f"{name} -> {dep}")
-          if missing:
-              print(f">>> WARNING: {len(missing)} unresolvable dep(s):")
-              for m in missing[:20]:
-                  print(f"    {m}")
+          for pkg in keep:
+              fname = pick_file(pkg)
+              if not fname:
+                  missing.append((pkg, "no .deb matching on HF"))
+                  continue
+              encoded = urllib.parse.quote(fname, safe="")
+              url = HF_BASE + "/" + encoded
+              out = Path("debs") / fname
+              if fetch(url, out):
+                  ok += 1
+              else:
+                  missing.append((pkg, fname))
+
+          print(">>> downloaded:", ok, "| missing:", len(missing))
+          for m in missing[:30]:
+              print("    MISS", m[0], ":", m[1])
+
+          if ok == 0:
+              sys.exit("::error::nothing downloaded — check HF .deb files")
 
           with open("selected.txt", "w") as fh:
-              for name in keep:
-                  fh.write(name + "\n")
-
-          print(">>> sample:", ", ".join(keep[:25]))
+              for pkg in keep:
+                  fh.write(pkg + "\n")
           PYEOF
+          python3 /tmp/download.py
 
-          python3 /tmp/resolve.py
-          wc -l selected.txt
-
-      # ==================================================================
-      # 3. Download needed .deb files FROM HUGGING FACE
-      # ==================================================================
-      - name: Download .deb files from Hugging Face
-        run: |
-          set -euo pipefail
-          mkdir -p debs
-          : > debs/.placeholder
-
-          # Build name -> Filename map from Packages
-          awk '
-            /^Package: / { pkg=substr($0,10) }
-            /^Filename: / { print pkg "\t" substr($0,11) }
-          ' work/Packages > work/name-to-file.tsv
-
-          echo ">>> mapping entries: $(wc -l < work/name-to-file.tsv)"
-
-          kept=0
-          missing=0
-          while read -r pkg; do
-            [ -z "$pkg" ] && continue
-            fname=$(awk -F'\t' -v p="$pkg" '$1==p {print $2; exit}' work/name-to-file.tsv)
-            if [ -z "$fname" ]; then
-              echo ">>> WARN: no Filename for $pkg"
-              missing=$((missing+1))
-              continue
-            fi
-
-            # Filename is a flat basename in our HF layout
-            fname=$(basename "$fname")
-            url="${HF_BASE}/${fname}"
-            out="debs/${fname}"
-
-            if [ -s "$out" ]; then
-              kept=$((kept+1))
-              continue
-            fi
-
-            if curl -fsSL --retry 3 --retry-delay 2 --max-time 300 \
-                    -o "$out" "$url"; then
-              kept=$((kept+1))
-            else
-              echo ">>> FAIL: $url"
-              missing=$((missing+1))
-              rm -f "$out"
-            fi
-          done < selected.txt
-
-          echo ">>> downloaded: $kept, missing: $missing"
+          echo ">>> debs dir size:"
           du -sh debs
-          [ "$kept" -gt 0 ] || { echo "::error::nothing downloaded"; exit 1; }
+          echo ">>> .deb count:"
+          find debs -maxdepth 1 -name '*.deb' | wc -l
 
-      # ==================================================================
-      # 4. Extract prefix data into staging
-      # ==================================================================
       - name: Extract into staging
         run: |
           set -euo pipefail
@@ -242,6 +258,7 @@ jobs:
             [ -f "$deb" ] || continue
             tmpdir=$(mktemp -d)
             if ! dpkg-deb -x "$deb" "$tmpdir" 2>/dev/null; then
+              echo ">>> skip invalid: $(basename "$deb")"
               rm -rf "$tmpdir"; continue
             fi
             prefix_dir="$tmpdir/data/data/app.xodos2/files/usr"
@@ -257,10 +274,6 @@ jobs:
 
           echo ">>> staging size: $(du -sh "$STAGING" | awk '{print $1}')"
 
-      # ==================================================================
-      # 5. Force-patch every config file — do not trust the source .deb
-      # ==================================================================
-
       - name: Overwrite sources.list
         run: |
           set -euo pipefail
@@ -275,64 +288,54 @@ jobs:
             echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-glibc glibc main'
             echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-tur tur-packages tur tur-on-device tur-continuous'
           } > staging/etc/apt/sources.list
-
           cat staging/etc/apt/sources.list
 
       - name: Replace pkg with thin apt wrapper
         run: |
           set -euo pipefail
-          cat > staging/bin/pkg <<'EOF'
-          #!/data/data/app.xodos2/files/usr/bin/bash
-          TERMUX_PREFIX=/data/data/app.xodos2/files/usr
-          export PATH="$TERMUX_PREFIX/bin:$PATH"
-          export TERMUX_PREFIX
-          CMD="$1"
-          shift 2>/dev/null || true
-          case "$CMD" in
-            up|update) exec apt update "$@" ;;
-            upgrade) exec apt upgrade "$@" ;;
-            full-upgrade) exec apt full-upgrade "$@" ;;
-            install) exec apt install "$@" ;;
-            reinstall) exec apt install --reinstall "$@" ;;
-            downgrade) exec apt install --allow-downgrades "$@" ;;
-            uninstall|remove) exec apt remove "$@" ;;
-            purge) exec apt purge "$@" ;;
-            autoremove) exec apt autoremove "$@" ;;
-            autoclean) exec apt autoclean "$@" ;;
-            clean) exec apt clean "$@" ;;
-            list) exec apt list "$@" ;;
-            list-all) exec apt list --all-versions "$@" ;;
-            list-installed) exec apt list --installed "$@" ;;
-            list-upgradable) exec apt list --upgradable "$@" ;;
-            search) exec apt search "$@" ;;
-            show) exec apt show "$@" ;;
-            files) exec dpkg -L "$@" ;;
-            hold|unhold) exec apt-mark "$CMD" "$@" ;;
-            ""|help|-h|--help)
-              echo "Usage: pkg <command> [args]"
-              echo "Commands: up upgrade full-upgrade install reinstall remove"
-              echo "          purge autoremove clean list list-all list-installed"
-              echo "          list-upgradable search show files hold unhold"
-              ;;
-            *) echo "pkg: unknown command '$CMD'" >&2; exit 1 ;;
-          esac
-          EOF
+          {
+            echo '#!/data/data/app.xodos2/files/usr/bin/bash'
+            echo 'TERMUX_PREFIX=/data/data/app.xodos2/files/usr'
+            echo 'export PATH="$TERMUX_PREFIX/bin:$PATH"'
+            echo 'export TERMUX_PREFIX'
+            echo 'CMD="$1"'
+            echo 'shift 2>/dev/null || true'
+            echo 'case "$CMD" in'
+            echo '  up|update) exec apt update "$@" ;;'
+            echo '  upgrade) exec apt upgrade "$@" ;;'
+            echo '  full-upgrade) exec apt full-upgrade "$@" ;;'
+            echo '  install) exec apt install "$@" ;;'
+            echo '  reinstall) exec apt install --reinstall "$@" ;;'
+            echo '  downgrade) exec apt install --allow-downgrades "$@" ;;'
+            echo '  uninstall|remove) exec apt remove "$@" ;;'
+            echo '  purge) exec apt purge "$@" ;;'
+            echo '  autoremove) exec apt autoremove "$@" ;;'
+            echo '  autoclean) exec apt autoclean "$@" ;;'
+            echo '  clean) exec apt clean "$@" ;;'
+            echo '  list) exec apt list "$@" ;;'
+            echo '  list-all) exec apt list --all-versions "$@" ;;'
+            echo '  list-installed) exec apt list --installed "$@" ;;'
+            echo '  list-upgradable) exec apt list --upgradable "$@" ;;'
+            echo '  search) exec apt search "$@" ;;'
+            echo '  show) exec apt show "$@" ;;'
+            echo '  files) exec dpkg -L "$@" ;;'
+            echo '  hold|unhold) exec apt-mark "$CMD" "$@" ;;'
+            echo '  ""|help|-h|--help)'
+            echo '    echo "Usage: pkg <command> [args]"'
+            echo '    ;;'
+            echo '  *) echo "pkg: unknown command: $CMD" >&2; exit 1 ;;'
+            echo 'esac'
+          } > staging/bin/pkg
           chmod 0755 staging/bin/pkg
-          echo ">>> pkg replaced. Header:"
+          echo ">>> pkg header:"
           head -3 staging/bin/pkg
 
       - name: Wipe mirrors dir + termux-change-repo
         run: |
           set -euo pipefail
-          # The pkg wrapper we just wrote doesn't consult mirrors, so
-          # the whole mirrors tree is dead weight. Remove it and drop
-          # termux-change-repo.
           rm -rf staging/etc/termux/mirrors
           rm -f  staging/bin/termux-change-repo
           rmdir staging/etc/termux 2>/dev/null || true
-
-          echo ">>> leftover in staging/etc:"
-          find staging/etc -maxdepth 2 -type f | head -20
 
       - name: Strip keyring + write insecure config
         run: |
@@ -360,9 +363,6 @@ jobs:
             sed -i 's|/data/data/com\.termux|/data/data/app.xodos2|g' "$f"
           done
 
-      # ==================================================================
-      # 6. Pack
-      # ==================================================================
       - name: Create tar.xz
         run: |
           set -euo pipefail
@@ -370,7 +370,7 @@ jobs:
           tar --numeric-owner -cJf "../bootstrap-${ARCH}.tar.xz" .
           cd ..
           ls -la "bootstrap-${ARCH}.tar.xz"
-          echo ">>> compressed size: $(du -h "bootstrap-${ARCH}.tar.xz" | awk '{print $1}')"
+          echo ">>> compressed: $(du -h "bootstrap-${ARCH}.tar.xz" | awk '{print $1}')"
           sha256sum "bootstrap-${ARCH}.tar.xz" > "bootstrap-${ARCH}.tar.xz.sha256"
 
       - name: Upload artifact
@@ -402,11 +402,7 @@ jobs:
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "Bootstrap archives $TAG" \
-            --notes "Prebuilt app.xodos2 bootstrap (plain .tar.xz).
-
-          Source: Hugging Face (xodos-main).
-          Patched: sources.list, pkg wrapper, mirrors removed, keyring stripped.
-          Extract directly into \$PREFIX." \
+            --notes "Prebuilt app.xodos2 bootstrap (plain .tar.xz)." \
             --target "${{ github.sha }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
