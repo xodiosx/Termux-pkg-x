@@ -12,13 +12,13 @@ on:
         required: true
         default: "xodiosx/xodos-packages"
       tags:
-        description: "Space/comma tags. Empty = auto-discover xodos-XoDos-* tags."
+        description: "Space/comma tags. Empty = auto-discover all xodos-XoDos-*-p<N>-* tags."
         required: false
         default: ""
       repos:
         description: "Sub-repos to include (comma-separated)"
         required: false
-        default: "main,x11,root,glibc"
+        default: "main,x11,root,glibc,tur,tur-on-device,tur-continuous"
 
 permissions:
   contents: read
@@ -32,10 +32,12 @@ jobs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y -qq dpkg-dev apt-utils gzip jq
-        pip install -q --upgrade "huggingface_hub[cli]<1.0"
+        pip install -q --upgrade "huggingface_hub<1.0"
+        python3 -c 'import huggingface_hub; print("huggingface_hub", huggingface_hub.__version__)'
 
     # ==================================================================
     # 1. Resolve tags + group by repo
+    #    Longer prefixes first so "tur-on-device" isn't swallowed by "tur".
     # ==================================================================
     - name: Resolve and group tags
       env:
@@ -61,25 +63,33 @@ jobs:
 
         if [ "${#TAGS[@]}" -eq 0 ]; then
           echo "::error::No tags found"
+          gh release list --repo "$SRC" --limit 30 || true
           exit 1
         fi
 
         for tag in "${TAGS[@]}"; do
           case "$tag" in
-            xodos-XoDos-main-p*)  printf 'main\t%s\n'  "$tag" >> /tmp/plan/groups.txt ;;
-            xodos-XoDos-x11-p*)   printf 'x11\t%s\n'   "$tag" >> /tmp/plan/groups.txt ;;
-            xodos-XoDos-root-p*)  printf 'root\t%s\n'  "$tag" >> /tmp/plan/groups.txt ;;
-            xodos-XoDos-glibc-p*) printf 'glibc\t%s\n' "$tag" >> /tmp/plan/groups.txt ;;
+            # longer prefixes first
+            xodos-XoDos-tur-continuous-p*) printf 'tur-continuous\t%s\n' "$tag" >> /tmp/plan/groups.txt ;;
+            xodos-XoDos-tur-on-device-p*)  printf 'tur-on-device\t%s\n'  "$tag" >> /tmp/plan/groups.txt ;;
+            xodos-XoDos-tur-p*)            printf 'tur\t%s\n'            "$tag" >> /tmp/plan/groups.txt ;;
+            xodos-XoDos-main-p*)           printf 'main\t%s\n'           "$tag" >> /tmp/plan/groups.txt ;;
+            xodos-XoDos-x11-p*)            printf 'x11\t%s\n'            "$tag" >> /tmp/plan/groups.txt ;;
+            xodos-XoDos-root-p*)           printf 'root\t%s\n'           "$tag" >> /tmp/plan/groups.txt ;;
+            xodos-XoDos-glibc-p*)          printf 'glibc\t%s\n'          "$tag" >> /tmp/plan/groups.txt ;;
+            *) echo ">>> skipped (unrecognised): $tag" ;;
           esac
         done
 
         cut -f1 /tmp/plan/groups.txt | sort -u > /tmp/plan/repos.txt
-        echo ">>> Repos:"
+        echo ">>> Repos present:"
         sed 's/^/    /' /tmp/plan/repos.txt
+        echo ""
+        echo ">>> Full tag → repo mapping:"
+        sort /tmp/plan/groups.txt | sed 's/^/    /'
 
     # ==================================================================
-    # 2. Download .deb files from GitHub — ONLY for reading metadata.
-    #    They are NOT uploaded to Hugging Face.
+    # 2. Download .deb from GitHub (metadata only)
     # ==================================================================
     - name: Download .deb from GitHub (metadata only)
       env:
@@ -108,12 +118,21 @@ jobs:
             fi
             rm -rf "$tmpdir"
           done < <(grep -P "^${repo}\t" /tmp/plan/groups.txt | cut -f2)
+
+          total=$(find "/tmp/raw-debs/$repo" -maxdepth 1 -type f -name '*.deb' 2>/dev/null | wc -l)
+          echo ">>> repo $repo: $total .deb total"
         done < /tmp/plan/repos.txt
 
     # ==================================================================
-    # 3. Build the four dists/ trees. Filename = flat basename.
+    # 3. Build Packages files
+    #    Layout:
+    #      xodos-main/dists/stable/main/binary-aarch64/Packages.gz
+    #      xodos-x11/dists/x11/main/binary-aarch64/Packages.gz
+    #      xodos-root/dists/root/stable/binary-aarch64/Packages.gz
+    #      xodos-glibc/dists/glibc/main/binary-aarch64/Packages.gz
+    #      xodos-tur/dists/tur-packages/{tur,tur-on-device,tur-continuous}/...
     # ==================================================================
-    - name: Build dists/ metadata
+    - name: Build Packages files
       run: |
         set -euo pipefail
         BUILD=/tmp/aptrepo
@@ -123,20 +142,22 @@ jobs:
         while IFS= read -r repo; do
           [ -z "$repo" ] && continue
           case "$repo" in
-            main)  dist=stable; comp=main ;;
-            x11)   dist=x11;    comp=main ;;
-            root)  dist=root;   comp=stable ;;
-            glibc) dist=glibc;  comp=main ;;
-            *)     continue ;;
+            main)           target=xodos-main;  dist=stable;       comp=main ;;
+            x11)            target=xodos-x11;   dist=x11;          comp=main ;;
+            root)           target=xodos-root;  dist=root;         comp=stable ;;
+            glibc)          target=xodos-glibc; dist=glibc;        comp=main ;;
+            tur)            target=xodos-tur;   dist=tur-packages; comp=tur ;;
+            tur-on-device)  target=xodos-tur;   dist=tur-packages; comp=tur-on-device ;;
+            tur-continuous) target=xodos-tur;   dist=tur-packages; comp=tur-continuous ;;
+            *) echo ">>> skip unknown repo: $repo"; continue ;;
           esac
 
-          echo ">>> building dists/${dist}/${comp} for $repo"
+          echo ">>> building $target/dists/$dist/$comp  (source repo: $repo)"
 
-          outd="$BUILD/dists/${dist}/${comp}/binary-aarch64"
+          outd="$BUILD/$target/dists/$dist/$comp/binary-aarch64"
           mkdir -p "$outd"
           : > "$outd/Packages"
 
-          # Dedup by package name, keep highest version
           tsv="/tmp/all-${repo}.tsv"
           : > "$tsv"
           shopt -s nullglob
@@ -147,6 +168,13 @@ jobs:
             printf '%s\t%s\t%s\n' "$pkg" "$ver" "$deb" >> "$tsv"
           done
           shopt -u nullglob
+
+          in_count=$(wc -l < "$tsv")
+          echo "    input .deb: $in_count"
+          if [ "$in_count" -eq 0 ]; then
+            echo "    WARN: no .deb for $repo — skipping"
+            continue
+          fi
 
           sort -t$'\t' -k1,1 -k2,2rV "$tsv" | awk -F'\t' '!seen[$1]++' > "/tmp/winners-${repo}.tsv"
 
@@ -159,10 +187,9 @@ jobs:
             sha1=$(sha1sum "$path" | awk '{print $1}')
             sha256=$(sha256sum "$path" | awk '{print $1}')
 
-            # Emit control info
             dpkg-deb -f "$path" >> "$outd/Packages"
             {
-              echo "Filename: ${fname}"     # flat! relative to HF root
+              echo "Filename: ${fname}"
               echo "Size: ${size}"
               echo "MD5sum: ${md5}"
               echo "SHA1: ${sha1}"
@@ -173,57 +200,105 @@ jobs:
           done < "/tmp/winners-${repo}.tsv"
 
           echo "    entries: $placed"
-
           gzip -kf -9 "$outd/Packages"
-
-          # Release file
-          conf="/tmp/release-${repo}.conf"
-          {
-            echo 'APT::FTPArchive::Release::Origin "xodos";'
-            echo "APT::FTPArchive::Release::Label \"xodos Termux ${repo}\";"
-            echo "APT::FTPArchive::Release::Suite \"${dist}\";"
-            echo "APT::FTPArchive::Release::Codename \"${dist}\";"
-            echo 'APT::FTPArchive::Release::Architectures "aarch64";'
-            echo "APT::FTPArchive::Release::Components \"${comp}\";"
-            echo "APT::FTPArchive::Release::Description \"xodos Termux ${repo}\";"
-          } > "$conf"
-
-          cd "$BUILD"
-          apt-ftparchive -c "$conf" release "dists/${dist}" > "dists/${dist}/Release"
-          cp "dists/${dist}/Release" "dists/${dist}/InRelease"
-          cd - >/dev/null
+          rm -f "$outd/Packages.xz"
         done < /tmp/plan/repos.txt
 
+    # ==================================================================
+    # 4. Generate Release files — one per dist within each xodos-* folder
+    #    TUR: 3 components must be listed in one Release for tur-packages.
+    # ==================================================================
+    - name: Generate Release files
+      run: |
+        set -euo pipefail
+        BUILD=/tmp/aptrepo
+        cd "$BUILD"
+
+        for target in xodos-main xodos-x11 xodos-root xodos-glibc xodos-tur; do
+          [ -d "$target/dists" ] || continue
+          for dist_dir in "$target"/dists/*/; do
+            [ -d "$dist_dir" ] || continue
+            dist="$(basename "$dist_dir")"
+
+            comps=""
+            for comp_dir in "$dist_dir"*/; do
+              [ -d "$comp_dir" ] || continue
+              comp="$(basename "$comp_dir")"
+              if [ -d "$comp_dir/binary-aarch64" ] && [ -s "$comp_dir/binary-aarch64/Packages" ]; then
+                comps="${comps}${comps:+ }$comp"
+              fi
+            done
+
+            if [ -z "$comps" ]; then
+              echo ">>> skip empty dist: $target/dists/$dist"
+              continue
+            fi
+
+            conf="/tmp/release-${target}-${dist}.conf"
+            {
+              echo 'APT::FTPArchive::Release::Origin "xodos";'
+              echo "APT::FTPArchive::Release::Label \"xodos ${target}/${dist}\";"
+              echo "APT::FTPArchive::Release::Suite \"${dist}\";"
+              echo "APT::FTPArchive::Release::Codename \"${dist}\";"
+              echo 'APT::FTPArchive::Release::Architectures "aarch64";'
+              echo "APT::FTPArchive::Release::Components \"${comps}\";"
+              echo "APT::FTPArchive::Release::Description \"xodos ${target} (${dist})\";"
+            } > "$conf"
+
+            echo ">>> release: $target/dists/$dist  (comps: $comps)"
+            apt-ftparchive -c "$conf" release "$target/dists/$dist" \
+              > "$target/dists/$dist/Release"
+            cp "$target/dists/$dist/Release" "$target/dists/$dist/InRelease"
+          done
+        done
+
         echo ""
-        echo ">>> final structure:"
+        echo ">>> final tree:"
         find "$BUILD" -type f | sort | sed 's/^/    /'
         echo ""
-        echo ">>> total size:"
-        du -sh "$BUILD"
+        echo ">>> total size: $(du -sh "$BUILD" | awk '{print $1}')"
 
     # ==================================================================
-    # 4. Upload ONLY the dists/ folder to HF.
-    #    The .deb files are already there flat.
+    # 5. Upload every xodos-* folder to Hugging Face as top-level dirs
     # ==================================================================
-    - name: Upload dists/ to Hugging Face
+    - name: Upload to Hugging Face
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         HF_REPO: ${{ inputs.hf_repo_id }}
       run: |
         set -euo pipefail
 
-        # Create repo if needed
-        huggingface-cli repo create "$HF_REPO" --repo-type dataset --exist-ok --token "$HF_TOKEN"
+        python3 << 'PYEOF'
+import os, pathlib
+from huggingface_hub import HfApi
 
-        # Upload only dists/
-        echo ">>> uploading dists/ ..."
-        huggingface-cli upload "$HF_REPO" /tmp/aptrepo/dists dists \
-          --repo-type dataset \
-          --token "$HF_TOKEN" \
-          --delete "*"     # wipe existing dists/ only, not .deb files
+api = HfApi()
+repo = os.environ['HF_REPO']
+token = os.environ['HF_TOKEN']
 
-        echo ">>> upload complete"
-        echo ">>> live at: https://huggingface.co/datasets/$HF_REPO/tree/main/dists"
+api.create_repo(repo_id=repo, repo_type='dataset', exist_ok=True, token=token)
+print('>>> HF repo ready:', repo)
+
+targets = ['xodos-main', 'xodos-x11', 'xodos-root', 'xodos-glibc', 'xodos-tur']
+for t in targets:
+    local = pathlib.Path('/tmp/aptrepo') / t
+    if not local.is_dir():
+        print(f'>>> skip {t} (not built this run)')
+        continue
+    print(f'>>> uploading {t}/ ...')
+    api.upload_folder(
+        folder_path=str(local),
+        path_in_repo=t,
+        repo_id=repo,
+        repo_type='dataset',
+        token=token,
+        commit_message=f'Update {t} APT metadata',
+        delete_patterns=['*'],   # wipe stale files under this prefix only
+    )
+    print(f'>>> {t}/ uploaded')
+
+print('>>> all done')
+PYEOF
 
     - name: Summary
       run: |
@@ -232,11 +307,20 @@ jobs:
           echo ""
           echo "Base: \`https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main\`"
           echo ""
-          echo "### sources.list"
+          echo "### sources.list entries"
+          echo ""
+          echo '**Official Termux repos (mirrored by xodos):**'
           echo '```'
-          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main stable main"
-          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main x11 main"
-          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main root stable"
-          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main glibc main"
+          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/xodos-main stable main"
+          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/xodos-x11 x11 main"
+          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/xodos-root root stable"
+          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/xodos-glibc glibc main"
           echo '```'
+          echo ""
+          echo '**TUR (mirrored by xodos):**'
+          echo '```'
+          echo "deb [trusted=yes] https://huggingface.co/datasets/${{ inputs.hf_repo_id }}/resolve/main/xodos-tur tur-packages tur tur-on-device tur-continuous"
+          echo '```'
+          echo ""
+          echo "Add all five lines to \`\$PREFIX/etc/apt/sources.list.d/xodos.list\`."
         } >> $GITHUB_STEP_SUMMARY
