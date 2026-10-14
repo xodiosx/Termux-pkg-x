@@ -1,4 +1,4 @@
-name: Generate bootstrap XoDos 
+name: Generate bootstrap XoDos
 
 on:
   schedule:
@@ -6,13 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to pull .deb files from (leave empty for latest with .deb assets)"
+        description: "Release tag to pull .deb files from (leave empty for latest)"
         required: false
         default: ""
       arch:
         description: "Comma-separated arch list, or 'all'"
         required: false
-        default: "all"
+        default: "aarch64"
 
 permissions:
   contents: write
@@ -40,8 +40,7 @@ jobs:
           count_debs() {
             local tag="$1"
             local n
-            n=$(gh release view "$tag" \
-                  --repo "${{ github.repository }}" \
+            n=$(gh release view "$tag" --repo "${{ github.repository }}" \
                   --json assets \
                   --jq '[.assets[]?.name // empty] | map(select(endswith(".deb"))) | length' \
                   2>/dev/null || echo "0")
@@ -51,44 +50,37 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then
             TAG="$INPUT_TAG"
             count=$(count_debs "$TAG")
-            echo ">>> user-provided tag: $TAG (${count} .deb assets)"
+            echo ">>> user-provided tag: $TAG ($count .deb)"
             if [ "${count:-0}" -eq 0 ]; then
-              echo "::error::Release '${TAG}' has no .deb assets"
-              gh release view "$TAG" --repo "${{ github.repository }}" \
-                --json assets --jq '.assets[]?.name // empty' || true
+              echo "::error::Release '$TAG' has no .deb assets"
               exit 1
             fi
           else
             mapfile -t TAGS < <(
-              gh release list --repo "${{ github.repository }}" \
-                --limit 200 \
+              gh release list --repo "${{ github.repository }}" --limit 200 \
                 --json tagName,createdAt \
-                --jq 'sort_by(.createdAt) | reverse | .[].tagName | select(startswith("bootstrap-") | not)'
+                --jq 'sort_by(.createdAt) | reverse | .[].tagName
+                       | select(startswith("bootstrap-") | not)
+                       | select(startswith("merged-") | not)'
             )
             if [ "${#TAGS[@]}" -eq 0 ]; then
-              echo "::error::No non-bootstrap releases in this repo."
+              echo "::error::No usable releases found"
               exit 1
             fi
             TAG=""
             for t in "${TAGS[@]}"; do
               [ -z "$t" ] && continue
               c=$(count_debs "$t")
-              echo "    $t -> ${c} .deb asset(s)"
-              if [ "${c:-0}" -gt 0 ]; then
-                TAG="$t"; break
-              fi
+              echo "    $t -> $c .deb"
+              if [ "${c:-0}" -gt 0 ]; then TAG="$t"; break; fi
             done
-            if [ -z "$TAG" ]; then
-              echo "::error::No release with .deb assets found."
-              exit 1
-            fi
+            [ -z "$TAG" ] && { echo "::error::No release with .deb assets"; exit 1; }
             echo ">>> picked: $TAG"
           fi
-
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
           if [ -z "$INPUT_ARCH" ] || [ "$INPUT_ARCH" = "all" ]; then
-            ARCHS='["aarch64","arm","i686","x86_64"]'
+            ARCHS='["aarch64"]'
           else
             ARCHS=$(printf '%s' "$INPUT_ARCH" | python3 -c 'import sys, json; print(json.dumps([a.strip() for a in sys.stdin.read().split(",") if a.strip()]))')
           fi
@@ -125,37 +117,48 @@ jobs:
             --pattern "*.deb" \
             --dir ./all-debs
           n=$(find ./all-debs -name '*.deb' | wc -l)
-          echo ">>> downloaded: ${n} files"
-          if [ "$n" -eq 0 ]; then
-            echo "::error::No .deb files downloaded from release ${RELEASE_TAG}"
-            exit 1
-          fi
+          echo ">>> downloaded: $n .deb files"
+          [ "$n" -eq 0 ] && { echo "::error::No .deb files in release"; exit 1; }
 
+      # ============================================================
+      # Resolve dependency closure for a MINIMAL bootstrap
+      # ============================================================
       - name: Resolve dependency closure
         env:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          python3 << 'PYEOF'
+
+          cat > /tmp/resolve.py <<'PYEOF'
           import subprocess, os
           from collections import defaultdict
 
           ARCH = os.environ["ARCH"]
           deb_dir = "all-debs"
 
+          # ---- Minimal bootstrap package list (Termux-style) ----
           essentials = [
-              "apt", "bash", "bash-completion", "bzip2", "ca-certificates",
-              "coreutils", "curl", "dash", "diffutils", "dpkg", "ed",
-              "findutils", "gawk", "grep", "gzip", "inetutils", "less",
-              "libandroid-support", "libbz2", "libc++", "libcap", "libcurl",
-              "libexpat", "libgcrypt", "libgmp", "libgnutls", "libgpg-error",
-              "libiconv", "liblzma", "libmd", "libmpfr", "libnettle",
-              "libnghttp2", "libnpth", "libsqlite", "libssh2", "libunistring",
-              "libxml2", "lz4", "ncurses", "ncurses-utils", "openssl",
-              "openssl-tool", "patch", "procps", "psmisc", "readline",
-              "resolv-conf", "sed", "tar", "termux-am", "termux-am-socket",
-              "termux-core", "termux-exec", "termux-licenses", "termux-tools",
-              "unzip", "util-linux", "xz-utils", "zlib", "zstd",
+              # Package manager
+              "apt", "dpkg",
+              # Shells
+              "bash", "dash",
+              # Core file utils
+              "coreutils", "findutils", "grep", "sed", "gawk",
+              "diffutils", "patch", "ed", "less", "nano",
+              # Archivers
+              "tar", "gzip", "bzip2", "xz-utils", "zstd", "unzip",
+              # Networking + TLS
+              "curl", "openssl", "openssl-tool", "ca-certificates",
+              "resolv-conf", "inetutils",
+              # Process / system
+              "procps", "psmisc", "util-linux",
+              # Terminal
+              "ncurses", "ncurses-utils", "readline", "bash-completion",
+              # Termux infra
+              "termux-am", "termux-am-socket", "termux-core",
+              "termux-exec", "termux-licenses", "termux-tools",
+              # Core libs commonly referenced as "always there"
+              "libandroid-support", "libc++", "zlib",
           ]
 
           def dpkg_field(path, field):
@@ -201,12 +204,6 @@ jobs:
               for p in parse_list(provides_raw):
                   provides_map[p].append(name)
 
-          for name, info in pkg_info.items():
-              if name.startswith("lib"):
-                  if info["arch"] == "all" or info["arch"] == ARCH:
-                      if name not in essentials:
-                          essentials.append(name)
-
           needed, queue = set(), []
           for e in essentials:
               if e in pkg_info and e not in needed:
@@ -237,8 +234,7 @@ jobs:
 
           print(f">>> keeping {len(keep)} packages for arch {ARCH}")
           if skip_arch:
-              print(f">>> skipped {len(skip_arch)} wrong-arch: {', '.join(skip_arch[:10])}"
-                    + (" ..." if len(skip_arch) > 10 else ""))
+              print(f">>> skipped {len(skip_arch)} wrong-arch")
 
           missing = []
           for name in keep:
@@ -246,7 +242,7 @@ jobs:
                   if dep not in pkg_info and dep not in provides_map:
                       missing.append(f"{name} -> {dep}")
           if missing:
-              print(f">>> WARNING: unresolvable deps ({len(missing)}):")
+              print(f">>> WARNING: {len(missing)} unresolvable dep(s):")
               for m in missing[:20]:
                   print(f"    {m}")
 
@@ -257,6 +253,7 @@ jobs:
           print(">>> sample:", ", ".join(keep[:20]))
           PYEOF
 
+          python3 /tmp/resolve.py
           wc -l selected-packages.txt
 
       - name: Copy selected .deb files
@@ -281,14 +278,11 @@ jobs:
             if [ -n "$found" ]; then
               cp "$found" debs/
               kept=$((kept+1))
-            else
-              echo ">>> WARNING: no .deb found for '$pkg'"
             fi
           done < selected-packages.txt
 
-          echo ">>> copied ${kept} .deb files to debs/"
-          ls debs/ > /tmp/debs-list.txt
-          head -20 /tmp/debs-list.txt || true
+          echo ">>> copied $kept .deb files to debs/"
+          du -sh debs
 
       - name: Extract into staging prefix
         run: |
@@ -299,7 +293,6 @@ jobs:
 
           shopt -s nullglob
           for deb in debs/*.deb; do
-            pkg=$(dpkg-deb -f "$deb" Package)
             tmpdir=$(mktemp -d)
             dpkg-deb -x "$deb" "$tmpdir"
             prefix_dir="$tmpdir/data/data/app.xodos2/files/usr"
@@ -308,98 +301,33 @@ jobs:
             fi
             if [ -d "$prefix_dir" ]; then
               cp -a "$prefix_dir/." "$STAGING/"
-            else
-              echo ">>> NOTE: $pkg has no recognisable prefix; skipping data"
             fi
             rm -rf "$tmpdir"
           done
           shopt -u nullglob
 
-          ls -la "$STAGING"
+          echo ">>> staging size: $(du -sh "$STAGING" | awk '{print $1}')"
 
-      - name: Verify key libraries are present
-        run: |
-          set -euo pipefail
-          require=(
-            "lib/libandroid-selinux.so"
-            "lib/libandroid-glob.so"
-            "lib/libandroid-support.so"
-            "lib/libandroid-execinfo.so"
-            "lib/libandroid-shmem.so"
-            "lib/libandroid-spawn.so"
-            "lib/libandroid-utimes.so"
-            "lib/libandroid-posix-semaphore.so"
-          )
-          missing=0
-          for f in "${require[@]}"; do
-            if [ -e "staging/$f" ]; then
-              echo "  OK   $f"
-            else
-              echo "  MISS $f"
-              missing=$((missing+1))
-            fi
-          done
-          if [ "$missing" -gt 0 ]; then
-            echo "::warning::$missing key libraries are still missing"
-          else
-            echo ">>> all key libraries present"
-          fi
-
+      # ============================================================
+      # sources.list → Hugging Face repos (main / x11 / root / glibc / tur)
+      # ============================================================
       - name: Write sources.list
         run: |
           set -euo pipefail
           mkdir -p staging/etc/apt/sources.list.d
           rm -f staging/etc/apt/sources.list
           rm -f staging/etc/apt/sources.list.d/*.list 2>/dev/null || true
-          echo 'deb [trusted=yes] https://xodiosx.github.io/Termux-pkg-x stable main' \
-            > staging/etc/apt/sources.list
+
+          {
+            echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-main stable main'
+            echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-x11 x11 main'
+            echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-root root stable'
+            echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-glibc glibc main'
+            echo 'deb [trusted=yes] https://huggingface.co/datasets/xodiosx/xodos-packages/resolve/main/xodos-tur tur-packages tur tur-on-device tur-continuous'
+          } > staging/etc/apt/sources.list
+
+          echo ">>> sources.list:"
           cat staging/etc/apt/sources.list
-
-      # =================================================================
-      # FIX: don't delete the shipped subgroup mirror files. pkg's
-      # mirror_is_set() check and termux-change-repo both iterate the
-      # subgroup dirs (asia/, europe/, …) with find. Keep them.
-      # We only overwrite the top-level `default` and force pkg to use
-      # it via MIRROR_GROUP="default".
-      # =================================================================
-      - name: Force pkg to use only our mirror
-        run: |
-          set -euo pipefail
-          MIRROR_DIR="staging/etc/termux/mirrors"
-          mkdir -p "$MIRROR_DIR"
-
-          # Overwrite top-level default with our repo
-          cat > "$MIRROR_DIR/default" <<'EOF'
-          # This file is sourced by pkg
-          WEIGHT=10
-          MAIN="https://xodiosx.github.io/Termux-pkg-x"
-          EOF
-
-          # Re-create the standard subgroup dirs in case the termux-tools
-          # .deb omitted any (they're part of the shipped package but be safe).
-          for group in all asia chinese_mainland europe india north_america oceania russia south_america special; do
-            mkdir -p "$MIRROR_DIR/$group"
-          done
-
-          # Force pkg to always read our default file by injecting an
-          # early override right after the shebang.
-          PKG="staging/bin/pkg"
-          if [ -f "$PKG" ]; then
-            if ! grep -q 'FORCED_BY_XODIOSX' "$PKG"; then
-              awk 'NR==1 { print; print "# FORCED_BY_XODIOSX: force default mirror"; print "MIRROR_GROUP=\"default\""; print "export MIRROR_GROUP"; next } { print }' "$PKG" > "$PKG.new"
-              mv "$PKG.new" "$PKG"
-              chmod +x "$PKG"
-            fi
-            sed -i 's|deb \$MAIN|deb [trusted=yes] \$MAIN|g' "$PKG" || true
-            sed -i 's|"URIs: \$MAIN"|"URIs: [trusted=yes] \$MAIN"|g' "$PKG" || true
-          fi
-
-          echo ">>> mirrors/ top level:"
-          ls -la "$MIRROR_DIR"
-          echo ">>> mirrors/default:"
-          cat "$MIRROR_DIR/default"
-          echo ">>> pkg header:"
-          head -5 "$PKG" 2>/dev/null || true
 
       - name: Disable signature verification + strip keyring
         run: |
@@ -409,14 +337,15 @@ jobs:
           rm -rf staging/etc/termux-keyring     2>/dev/null || true
 
           mkdir -p staging/etc/apt/apt.conf.d
-          printf '%s\n' \
-            'Acquire::AllowInsecureRepositories "true";' \
-            'Acquire::AllowDowngradeToInsecureRepositories "true";' \
-            'APT::Get::AllowUnauthenticated "true";' \
-            > staging/etc/apt/apt.conf.d/99-insecure
+          {
+            echo 'Acquire::AllowInsecureRepositories "true";'
+            echo 'Acquire::AllowDowngradeToInsecureRepositories "true";'
+            echo 'APT::Get::AllowUnauthenticated "true";'
+          } > staging/etc/apt/apt.conf.d/99-insecure
 
-          ls staging/etc/apt/apt.conf.d/
-
+      # ============================================================
+      # Last-resort path fix in scripts (our build already renamed the prefix)
+      # ============================================================
       - name: Fix lingering com.termux paths
         run: |
           set -euo pipefail
@@ -426,7 +355,6 @@ jobs:
             exit 0
           fi
           for f in "${files[@]}"; do
-            echo ">>> patching $f"
             sed -i 's|/data/data/com\.termux|/data/data/app.xodos2|g' "$f"
           done
 
@@ -439,6 +367,7 @@ jobs:
           tar --numeric-owner -cJf "../bootstrap-${ARCH}.tar.xz" .
           cd ..
           ls -la "bootstrap-${ARCH}.tar.xz"
+          echo ">>> compressed size: $(du -h "bootstrap-${ARCH}.tar.xz" | awk '{print $1}')"
           sha256sum "bootstrap-${ARCH}.tar.xz" > "bootstrap-${ARCH}.tar.xz.sha256"
 
       - name: Upload artifact
@@ -470,7 +399,11 @@ jobs:
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "Bootstrap archives $TAG" \
-            --notes "Prebuilt app.xodos2 bootstrap archives (plain .tar.xz). Extract directly into \$PREFIX." \
+            --notes "Prebuilt app.xodos2 bootstrap archives (plain .tar.xz).
+          Extract directly into \$PREFIX.
+
+          Includes only core utils + apt + dpkg + tar + shells + libs.
+          Sources.list points to Hugging Face (xodos-main/x11/root/glibc/tur)." \
             --target "${{ github.sha }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
