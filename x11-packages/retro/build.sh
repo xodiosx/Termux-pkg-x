@@ -18,6 +18,7 @@ TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
 --enable-pulse
 --enable-x11
 --enable-sdl2
+--enable-microphone
 --disable-wayland
 "
 
