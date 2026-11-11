@@ -14,8 +14,8 @@ concurrency:
 
 jobs:
   sync-upstream:
-    # --- Use Ubuntu 22.04 for maximum stability ---
-    runs-on: ubuntu-22.04
+    
+    runs-on: ubuntu-26.04
 
     steps:
       # ------------------------------------------------------------------
