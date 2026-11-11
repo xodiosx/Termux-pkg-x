@@ -14,8 +14,7 @@ concurrency:
 
 jobs:
   sync-upstream:
-    # --- Use Ubuntu 26.04 (GA, future-proof for ubuntu-latest migration) ---
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04 # Or ubuntu-22.04 if you prefer the older image
 
     steps:
       - name: Verify GH_PUSH_TOKEN is present
@@ -30,23 +29,36 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      # 1. Bypass the Azure mirror in apt-mirrors.txt
-      #    This is the critical step that fixes the DNS resolution issue.
+      # 1. OVERRIDE DNS: Fixes the core "Temporary failure resolving" error
+      #    on Ubuntu 26.04 runners by bypassing systemd-resolved.
+      # ------------------------------------------------------------------
+      - name: Override DNS resolver with public nameservers
+        run: |
+          set -euo pipefail
+          # Remove the symlink and create a static file with reliable DNS servers
+          sudo rm -f /etc/resolv.conf
+          echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+          echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf
+          echo "options timeout:1 attempts:3" | sudo tee -a /etc/resolv.conf
+          echo "DNS configuration applied."
+
+      # ------------------------------------------------------------------
+      # 2. Bypass the Azure mirror (still a good safety net)
       # ------------------------------------------------------------------
       - name: Replace Azure mirror with archive.ubuntu.com
         run: |
           set -euo pipefail
-          MIRROR_LIST="/etc/apt/apt-mirrors.txt"
+          #MIRROR_LIST="/etc/apt/apt-mirrors.txt"
           if [ -f "$MIRROR_LIST" ] && grep -q "azure.archive.ubuntu.com" "$MIRROR_LIST"; then
             echo "Replacing azure.archive.ubuntu.com with archive.ubuntu.com"
             sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' "$MIRROR_LIST"
           else
-            echo "Azure mirror not found in $MIRROR_LIST — no change needed."
+            echo "Azure mirror not found — no change needed."
           fi
-          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list 2>/dev/null || true
+          #sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list 2>/dev/null || true
 
       # ------------------------------------------------------------------
-      # 2. Hardening APT: fast fail-over to the next mirror
+      # 3. Hardening APT: fast fail-over and retry policy
       # ------------------------------------------------------------------
       - name: Configure APT timeouts and disable same-mirror retries
         run: |
@@ -60,7 +72,7 @@ jobs:
           echo "APT timeout configuration applied."
 
       # ------------------------------------------------------------------
-      # 3. Robust apt-get update + install with a retry loop
+      # 4. Robust apt-get update + install with --fix-missing and retries
       # ------------------------------------------------------------------
       - name: Update APT and install git (with retries)
         run: |
@@ -82,7 +94,8 @@ jobs:
 
           for i in $(seq 1 $MAX_ATTEMPTS); do
             echo ">>> Attempt $i of $MAX_ATTEMPTS: apt-get install git ca-certificates"
-            if sudo apt-get install -y --reinstall git git-man ca-certificates; then
+            # Added --fix-missing to handle partial downloads
+            if sudo apt-get install -y --fix-missing --reinstall git git-man ca-certificates; then
               echo ">>> git installation succeeded."
               git --version
               which git
