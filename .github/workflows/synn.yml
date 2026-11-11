@@ -48,7 +48,7 @@ jobs:
       - name: Replace Azure mirror with archive.ubuntu.com
         run: |
           set -euo pipefail
-          #MIRROR_LIST="/etc/apt/apt-mirrors.txt"
+          MIRROR_LIST="/etc/apt/apt-mirrors.xt"
           if [ -f "$MIRROR_LIST" ] && grep -q "azure.archive.ubuntu.com" "$MIRROR_LIST"; then
             echo "Replacing azure.archive.ubuntu.com with archive.ubuntu.com"
             sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' "$MIRROR_LIST"
