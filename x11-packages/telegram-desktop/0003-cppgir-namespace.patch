@@ -1,6 +1,6 @@
 --- a/Telegram/SourceFiles/platform/linux/specific_linux.cpp
 +++ b/Telegram/SourceFiles/platform/linux/specific_linux.cpp
-@@ -51,9 +51,11 @@
+@@ -51,9 +51,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
  namespace {
  
  using namespace gi::repository;
@@ -13,7 +13,7 @@
  void PortalAutostart(bool enabled, Fn<void(bool)> done) {
  	const auto executable = ExecutablePathForShortcuts();
  	if (executable.isEmpty()) {
-@@ -894,3 +896,5 @@
+@@ -975,3 +977,5 @@ bool linuxMoveFile(const char *from, const char *to) {
  
  	return true;
  }
