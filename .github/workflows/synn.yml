@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   sync-upstream:
-    runs-on: ubuntu-latest
+    # --- Use Ubuntu 22.04 for maximum stability ---
+    runs-on: ubuntu-22.04
 
     steps:
       # ------------------------------------------------------------------
@@ -32,16 +33,50 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      # 0b. Update apt and (re)install git BEFORE checkout.
-      #     On the fresh ubuntu-latest image the preinstalled git /
-      #     credential helper has been reported to break actions/checkout
-      #     with "could not read Username ... terminal prompts disabled".
-      #     Reinstalling git from apt fixes that.
+      # 0b. Harden APT configuration to avoid mirror stalls.
+      #     Disable same-mirror retries and set a short timeout so apt
+      #     fails over to the next mirror quickly. (THRIFT-6234)
       # ------------------------------------------------------------------
-      - name: Update packages and install git
+      - name: Configure APT timeouts and retries
         run: |
           set -euo pipefail
-          sudo apt-get update
+          # Create a dedicated config fragment for our timeouts
+          sudo tee /etc/apt/apt.conf.d/99-ci-timeouts > /dev/null <<'EOF'
+          Acquire::Retries "0";
+          Acquire::http::Timeout "20";
+          Acquire::https::Timeout "20";
+          DPkg::Lock::Timeout "120";
+          EOF
+          echo "APT timeout configuration applied."
+
+      # ------------------------------------------------------------------
+      # 0c. Robust apt-get update with a retry loop.
+      #     Even with timeouts, a transient DNS blip can fail the first
+      #     attempt. We retry up to 3 times with a short backoff.
+      # ------------------------------------------------------------------
+      - name: Update APT package lists (with retry)
+        run: |
+          set -euo pipefail
+          MAX_ATTEMPTS=3
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo ">>> apt-get update attempt $i of $MAX_ATTEMPTS"
+            if sudo apt-get update; then
+              echo ">>> apt-get update succeeded on attempt $i"
+              exit 0
+            fi
+            echo ">>> apt-get update attempt $i failed. Retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "::error::apt-get update failed after $MAX_ATTEMPTS attempts"
+          exit 1
+
+      # ------------------------------------------------------------------
+      # 0d. Install/reinstall git.
+      #     With the hardened APT config above, this should be reliable.
+      # ------------------------------------------------------------------
+      - name: Install git
+        run: |
+          set -euo pipefail
           sudo apt-get install -y --reinstall \
             git \
             git-man \
