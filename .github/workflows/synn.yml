@@ -14,13 +14,10 @@ concurrency:
 
 jobs:
   sync-upstream:
-    
+    # --- Use Ubuntu 26.04 (GA, future-proof for ubuntu-latest migration) ---
     runs-on: ubuntu-26.04
 
     steps:
-      # ------------------------------------------------------------------
-      # 0a. Sanity-check that the secret is actually visible to this job.
-      # ------------------------------------------------------------------
       - name: Verify GH_PUSH_TOKEN is present
         env:
           TOKEN: ${{ secrets.GH_PUSH_TOKEN }}
@@ -33,14 +30,27 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      # 0b. Harden APT configuration to avoid mirror stalls.
-      #     Disable same-mirror retries and set a short timeout so apt
-      #     fails over to the next mirror quickly. (THRIFT-6234)
+      # 1. Bypass the Azure mirror in apt-mirrors.txt
+      #    This is the critical step that fixes the DNS resolution issue.
       # ------------------------------------------------------------------
-      - name: Configure APT timeouts and retries
+      - name: Replace Azure mirror with archive.ubuntu.com
         run: |
           set -euo pipefail
-          # Create a dedicated config fragment for our timeouts
+          MIRROR_LIST="/etc/apt/apt-mirrors.txt"
+          if [ -f "$MIRROR_LIST" ] && grep -q "azure.archive.ubuntu.com" "$MIRROR_LIST"; then
+            echo "Replacing azure.archive.ubuntu.com with archive.ubuntu.com"
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' "$MIRROR_LIST"
+          else
+            echo "Azure mirror not found in $MIRROR_LIST — no change needed."
+          fi
+          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list 2>/dev/null || true
+
+      # ------------------------------------------------------------------
+      # 2. Hardening APT: fast fail-over to the next mirror
+      # ------------------------------------------------------------------
+      - name: Configure APT timeouts and disable same-mirror retries
+        run: |
+          set -euo pipefail
           sudo tee /etc/apt/apt.conf.d/99-ci-timeouts > /dev/null <<'EOF'
           Acquire::Retries "0";
           Acquire::http::Timeout "20";
@@ -50,39 +60,41 @@ jobs:
           echo "APT timeout configuration applied."
 
       # ------------------------------------------------------------------
-      # 0c. Robust apt-get update with a retry loop.
-      #     Even with timeouts, a transient DNS blip can fail the first
-      #     attempt. We retry up to 3 times with a short backoff.
+      # 3. Robust apt-get update + install with a retry loop
       # ------------------------------------------------------------------
-      - name: Update APT package lists (with retry)
+      - name: Update APT and install git (with retries)
         run: |
           set -euo pipefail
           MAX_ATTEMPTS=3
           for i in $(seq 1 $MAX_ATTEMPTS); do
-            echo ">>> apt-get update attempt $i of $MAX_ATTEMPTS"
+            echo ">>> Attempt $i of $MAX_ATTEMPTS: apt-get update"
             if sudo apt-get update; then
-              echo ">>> apt-get update succeeded on attempt $i"
-              exit 0
+              echo ">>> apt-get update succeeded."
+              break
             fi
-            echo ">>> apt-get update attempt $i failed. Retrying in 5 seconds..."
+            if [ "$i" -eq "$MAX_ATTEMPTS" ]; then
+              echo "::error::apt-get update failed after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+            echo ">>> apt-get update failed. Retrying in 5 seconds..."
             sleep 5
           done
-          echo "::error::apt-get update failed after $MAX_ATTEMPTS attempts"
-          exit 1
 
-      # ------------------------------------------------------------------
-      # 0d. Install/reinstall git.
-      #     With the hardened APT config above, this should be reliable.
-      # ------------------------------------------------------------------
-      - name: Install git
-        run: |
-          set -euo pipefail
-          sudo apt-get install -y --reinstall \
-            git \
-            git-man \
-            ca-certificates
-          git --version
-          which git
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo ">>> Attempt $i of $MAX_ATTEMPTS: apt-get install git ca-certificates"
+            if sudo apt-get install -y --reinstall git git-man ca-certificates; then
+              echo ">>> git installation succeeded."
+              git --version
+              which git
+              break
+            fi
+            if [ "$i" -eq "$MAX_ATTEMPTS" ]; then
+              echo "::error::apt-get install failed after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+            echo ">>> apt-get install failed. Retrying in 5 seconds..."
+            sleep 5
+          done
 
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
@@ -107,9 +119,6 @@ jobs:
           git fetch upstream master
           git checkout master
 
-          # ------------------------------------------------------------------
-          # 1. Snapshot the paths we want to keep OUR version of.
-          # ------------------------------------------------------------------
           KEEP_PATHS=(".github/workflows")
           mkdir -p /tmp/keep
           for p in "${KEEP_PATHS[@]}"; do
@@ -120,14 +129,8 @@ jobs:
             fi
           done
 
-          # ------------------------------------------------------------------
-          # 2. Reset every tracked file to upstream's version.
-          # ------------------------------------------------------------------
           git checkout upstream/master -- .
 
-          # ------------------------------------------------------------------
-          # 3. Restore the paths we explicitly protected.
-          # ------------------------------------------------------------------
           for p in "${KEEP_PATHS[@]}"; do
             src="/tmp/keep/${p//\//__}"
             if [ -e "$src" ]; then
@@ -137,9 +140,6 @@ jobs:
             fi
           done
 
-          # ------------------------------------------------------------------
-          # 4. Show what actually changed.
-          # ------------------------------------------------------------------
           echo ">>> changes staged for this sync:"
           git add -A
           git diff --cached --stat | tail -30 || true
